@@ -3,46 +3,65 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from pyspark.sql import functions as F
 from utils.spark_session import get_spark_session
 from jobs.extraction import extract_data
-from jobs.transformation import transform_data, generate_user_profile
-from jobs.loading import load_data
+from jobs.transformation import (
+    clean_data,
+    identify_temperature_anomalies,
+    warming_speed_by_latitude,
+    compare_hemispheres
+)
+
 
 def main():
-    spark = get_spark_session("ECommerceETL")
+    spark = get_spark_session("TemperatureAnalysis")
 
     # 1. Extract
-    # Now faster because of manual schema
-    raw_data_path = "data/raw/*.csv"
+    raw_data_path = "data/raw/GlobalLandTemperaturesByCity.csv"
+    print("Chargement des données...")
     df = extract_data(spark, raw_data_path)
 
-    # 2. Transform (Enrichment)
-    print("Enriching data with Category Stats...")
-    df_enriched = transform_data(df)
+    # 2. Clean
+    print("Nettoyage des données...")
+    df_cleaned = clean_data(df)
+    df_cleaned.cache()
+
+    # 3. Identification des anomalies de température
+    print("\n" + "=" * 80)
+    print("ANNÉES EXCEPTIONNELLEMENT CHAUDES OU FROIDES")
+    print("=" * 80)
+    df_anomalies = identify_temperature_anomalies(df_cleaned)
+    df_anomalies.show(30, truncate=False)
+
+    # 4. Vitesse de réchauffement par bande de latitude
+    print("\n" + "=" * 80)
+    print("VITESSE DE RÉCHAUFFEMENT PAR BANDE DE LATITUDE")
+    print("=" * 80)
+    df_warming = warming_speed_by_latitude(df_cleaned)
+    df_warming.show(50, truncate=False)
+
+    # 5. Comparaison hémisphère Nord vs Sud
+    print("\n" + "=" * 80)
+    print("COMPARAISON HÉMISPHÈRE NORD VS SUD")
+    print("=" * 80)
+    df_hemisphere_evolution, df_hemisphere_stats = compare_hemispheres(df_cleaned)
     
-    # Cache because we split the pipeline here
-    df_enriched.cache()
-
-    # 3. Load Detailed Data
-    print("Loading detailed enriched data...")
-    # NOTE: We removed the .count() here. The write() is the only action we need.
-    load_data(df_enriched, "data/processed/ecommerce_enriched")
-
-    # 4. Transform (User Aggregation)
-    print("Generating User Profiles...")
-    df_user_profile = generate_user_profile(df_enriched)
+    print("\nStatistiques globales par hémisphère:")
+    df_hemisphere_stats.show(truncate=False)
     
-    # 5. Load User Data
-    print("Loading user profiles...")
-    df_user_profile.write.mode("overwrite").parquet("data/processed/user_profiles")
-
-    df_enriched.unpersist()
-    print("ETL Job Finished Successfully.")
-
-    # Pause execution so you can check the Web UI
-    input("Press Enter to finish...")
+    print("\nÉvolution temporelle (premières années):")
+    df_hemisphere_evolution.filter(F.col("Year") <= 1760).show(20, truncate=False)
     
+    print("\nÉvolution temporelle (dernières années):")
+    df_hemisphere_evolution.filter(F.col("Year") >= 2010).show(20, truncate=False)
+
+    df_cleaned.unpersist()
+    print("\nAnalyse terminée.")
+
+    input("Appuyez sur Entrée pour terminer...")
     spark.stop()
+
 
 if __name__ == "__main__":
     main()

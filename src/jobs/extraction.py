@@ -1,23 +1,18 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, DoubleType, TimestampType
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DateType
 
 def extract_data(spark: SparkSession, file_path: str) -> DataFrame:
     """
-    Reads CSV data using a predefined schema.
-    This avoids the expensive 'inferSchema' pass.
+    Reads the GlobalLandTemperaturesByCity CSV file.
     """
-
-    # Define the schema strictly matching the CSV columns
     schema = StructType([
-        StructField("event_time", TimestampType(), True),
-        StructField("event_type", StringType(), True),
-        StructField("product_id", IntegerType(), True),
-        StructField("category_id", LongType(), True),
-        StructField("category_code", StringType(), True),
-        StructField("brand", StringType(), True),
-        StructField("price", DoubleType(), True),
-        StructField("user_id", IntegerType(), True),
-        StructField("user_session", StringType(), True)
+        StructField("dt", DateType(), True),
+        StructField("AverageTemperature", DoubleType(), True),
+        StructField("AverageTemperatureUncertainty", DoubleType(), True),
+        StructField("City", StringType(), True),
+        StructField("Country", StringType(), True),
+        StructField("Latitude", StringType(), True),
+        StructField("Longitude", StringType(), True)
     ])
 
     df = spark.read \

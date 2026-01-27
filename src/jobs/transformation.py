@@ -1,75 +1,113 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.functions import broadcast
+from pyspark.sql.window import Window
 
-def transform_data(df: DataFrame) -> DataFrame:
-    """
-    Master transformation function.
-    """
-    # 1. Basic Cleaning (Previous step)
-    df_cleaned = clean_data(df)
-    
-    # 2. Enrichment (New step: Joins and Window-like logic)
-    df_enriched = enrich_with_category_stats(df_cleaned)
-
-    return df_enriched
 
 def clean_data(df: DataFrame) -> DataFrame:
     """
-    Standard cleaning: filtering and type casting.
+    Nettoie les données : filtre les valeurs nulles de température et extrait l'année.
+    Ajoute la latitude numérique et l'hémisphère.
     """
     df_cleaned = df.filter(
-        (F.col("user_id").isNotNull()) & 
-        (F.col("price") >= 0)
-    ).fillna({
-        "category_code": "unknown",
-        "brand": "unknown"
-    }).withColumn("event_date", F.to_date(F.col("event_time")))
-    
+        F.col("AverageTemperature").isNotNull() &
+        F.col("Latitude").isNotNull()
+    ).withColumn("Year", F.year(F.col("dt"))) \
+     .withColumn("LatitudeValue", F.regexp_extract(F.col("Latitude"), r"([\d.]+)", 1).cast("double")) \
+     .withColumn("LatitudeDirection", F.regexp_extract(F.col("Latitude"), r"([NS])", 1)) \
+     .withColumn("LatitudeNumeric", 
+                 F.when(F.col("LatitudeDirection") == "N", F.col("LatitudeValue"))
+                  .otherwise(-F.col("LatitudeValue"))) \
+     .withColumn("Hemisphere", 
+                 F.when(F.col("LatitudeDirection") == "N", "Nord")
+                  .otherwise("Sud")) \
+     .drop("LatitudeValue", "LatitudeDirection")
+
     return df_cleaned
 
-def enrich_with_category_stats(df: DataFrame) -> DataFrame:
-    """
-    Complex transformation:
-    1. Calculates average price per category.
-    2. Joins distinct stats back to the main table.
-    3. Flags products as 'Premium' or 'Budget'.
-    """
-    
-    # --- Aggregation Step ---
-    # Group by category and calculate average price
-    # We rename the column immediately to avoid ambiguity during the join
-    category_stats = df.groupBy("category_code").agg(
-        F.avg("price").alias("avg_category_price")
-    )
 
-    # --- Join Step ---
-    # We join the original distinct events with the aggregated stats.
-    # 'left' join ensures we don't lose events if stats are missing (though unlikely here)
-    df_joined = df.join(broadcast(category_stats), on="category_code", how="left")
-
-    # --- Classification Step ---
-    # Create a new business column comparing specific price to category average
-    df_final = df_joined.withColumn(
-        "price_segment",
-        F.when(F.col("price") > F.col("avg_category_price"), "Premium")
-        .otherwise("Budget")
-    )
-
-    return df_final
-
-def generate_user_profile(df: DataFrame) -> DataFrame:
+def identify_temperature_anomalies(df: DataFrame) -> DataFrame:
     """
-    Multi-level aggregation to create a User Profile.
-    Pivots the event_type to create columns: views_count, purchases_count, etc.
+    Identifie les années exceptionnellement chaudes ou froides.
+    Utilise la méthode des écarts-types (anomalie si > 2σ ou < -2σ).
     """
-    user_profile = df.groupBy("user_id").agg(
-        F.count("*").alias("total_activity"),
-        F.sum(F.when(F.col("event_type") == "purchase", F.col("price")).otherwise(0)).alias("total_spend"),
-        # The Pivot: turns row values ('view', 'cart') into columns
-        F.sum(F.when(F.col("event_type") == "view", 1).otherwise(0)).alias("views_count"),
-        F.sum(F.when(F.col("event_type") == "cart", 1).otherwise(0)).alias("cart_adds_count"),
-        F.sum(F.when(F.col("event_type") == "purchase", 1).otherwise(0)).alias("purchases_count")
+    # Température moyenne par année
+    yearly_temps = df.groupBy("Year").agg(
+        F.avg("AverageTemperature").alias("AvgTemp")
     )
     
-    return user_profile
+    # Calculer statistiques globales avec window function
+    stats_window = Window.orderBy(F.lit(1))
+    
+    anomalies = yearly_temps.withColumn(
+        "GlobalMean", F.avg("AvgTemp").over(stats_window)
+    ).withColumn(
+        "GlobalStdDev", F.stddev("AvgTemp").over(stats_window)
+    ).withColumn(
+        "Deviation", (F.col("AvgTemp") - F.col("GlobalMean")) / F.col("GlobalStdDev")
+    ).withColumn(
+        "Anomaly",
+        F.when(F.col("Deviation") > 2, "Exceptionnellement chaud")
+         .when(F.col("Deviation") < -2, "Exceptionnellement froid")
+         .otherwise("Normal")
+    ).filter(F.col("Anomaly") != "Normal") \
+     .select("Year", "AvgTemp", "Deviation", "Anomaly") \
+     .orderBy(F.desc("Deviation"))
+    
+    return anomalies
+
+
+def warming_speed_by_latitude(df: DataFrame) -> DataFrame:
+    """
+    Calcule la vitesse de réchauffement selon la latitude.
+    Regroupe par bandes de latitude de 10 degrés.
+    """
+    # Créer des bandes de latitude
+    df_with_bands = df.withColumn(
+        "LatitudeBand",
+        (F.floor(F.col("LatitudeNumeric") / 10) * 10).cast("int")
+    )
+    
+    # Température moyenne par bande et année
+    temp_by_band_year = df_with_bands.groupBy("LatitudeBand", "Year").agg(
+        F.avg("AverageTemperature").alias("AvgTemp")
+    )
+    
+    # Calculer la corrélation (indicateur de tendance)
+    warming_speed = temp_by_band_year.groupBy("LatitudeBand").agg(
+        F.corr("Year", "AvgTemp").alias("Correlation"),
+        F.min("Year").alias("PremièreAnnée"),
+        F.max("Year").alias("DernièreAnnée"),
+        F.avg("AvgTemp").alias("TempMoyenne"),
+        F.count("Year").alias("NombreAnnées")
+    ).withColumn(
+        "TendanceRechauffement",
+        F.when(F.col("Correlation") > 0.5, "Fort réchauffement")
+         .when(F.col("Correlation") > 0.2, "Réchauffement modéré")
+         .when(F.col("Correlation") > -0.2, "Stable")
+         .otherwise("Refroidissement")
+    ).orderBy("LatitudeBand")
+    
+    return warming_speed
+
+
+def compare_hemispheres(df: DataFrame) -> DataFrame:
+    """
+    Compare l'évolution des températures entre hémisphères Nord et Sud.
+    Retourne deux DataFrames : évolution temporelle et statistiques globales.
+    """
+    # Évolution temporelle
+    hemisphere_evolution = df.groupBy("Hemisphere", "Year").agg(
+        F.avg("AverageTemperature").alias("TempMoyenne"),
+        F.count("*").alias("NombreMesures")
+    ).orderBy("Year", "Hemisphere")
+    
+    # Statistiques globales par hémisphère
+    hemisphere_stats = df.groupBy("Hemisphere").agg(
+        F.avg("AverageTemperature").alias("TempMoyenneGlobale"),
+        F.min("AverageTemperature").alias("TempMin"),
+        F.max("AverageTemperature").alias("TempMax"),
+        F.stddev("AverageTemperature").alias("EcartType"),
+        F.count("*").alias("TotalMesures")
+    )
+    
+    return hemisphere_evolution, hemisphere_stats
