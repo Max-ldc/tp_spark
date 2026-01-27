@@ -1,75 +1,66 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.functions import broadcast
 
-def transform_data(df: DataFrame) -> DataFrame:
+def transform_global_temperature_by_year(df_global: DataFrame) -> DataFrame:
     """
-    Master transformation function.
+    Calculates average temperature by year globally.
+    Filters out years with less than 6 months of data.
+    Input: DataFrame from GlobalTemperatures.csv (must include 'dt' and 'LandAverageTemperature')
     """
-    # 1. Basic Cleaning (Previous step)
-    df_cleaned = clean_data(df)
-    
-    # 2. Enrichment (New step: Joins and Window-like logic)
-    df_enriched = enrich_with_category_stats(df_cleaned)
+    return df_global \
+        .filter(F.col("LandAverageTemperature").isNotNull()) \
+        .withColumn("year", F.year(F.col("dt"))) \
+        .groupBy("year") \
+        .agg(
+            F.avg("LandAverageTemperature").alias("avg_temperature"),
+            F.count("dt").alias("months_count")
+        ) \
+        .filter(F.col("months_count") >= 6) \
+        .drop("months_count") \
+        .orderBy("year")
 
-    return df_enriched
-
-def clean_data(df: DataFrame) -> DataFrame:
+def detect_exceptional_years(df_global_yearly: DataFrame) -> DataFrame:
     """
-    Standard cleaning: filtering and type casting.
+    Identifies exceptional years (hottest and coldest) based on global average.
+    Calculates the overall average and difference from mean.
     """
-    df_cleaned = df.filter(
-        (F.col("user_id").isNotNull()) & 
-        (F.col("price") >= 0)
-    ).fillna({
-        "category_code": "unknown",
-        "brand": "unknown"
-    }).withColumn("event_date", F.to_date(F.col("event_time")))
-    
-    return df_cleaned
+    # Calculate global mean of the yearly averages
+    stats = df_global_yearly.select(F.avg("avg_temperature").alias("global_mean"), F.stddev("avg_temperature").alias("global_std")).collect()[0]
+    global_mean = stats["global_mean"]
+    global_std = stats["global_std"]
 
-def enrich_with_category_stats(df: DataFrame) -> DataFrame:
+    # Add deviation metrics
+    return df_global_yearly \
+        .withColumn("global_mean", F.lit(global_mean)) \
+        .withColumn("anomaly", F.col("avg_temperature") - F.col("global_mean")) \
+        .withColumn("z_score", (F.col("avg_temperature") - global_mean) / global_std) \
+        .orderBy(F.abs(F.col("anomaly")).desc())
+
+def transform_temperature_by_latitude_and_year(df_city: DataFrame) -> DataFrame:
     """
-    Complex transformation:
-    1. Calculates average price per category.
-    2. Joins distinct stats back to the main table.
-    3. Flags products as 'Premium' or 'Budget'.
+    Calculates average temperature partitioned by latitude and year.
+    Input: DataFrame from GlobalLandTemperaturesByCity.csv
     """
-    
-    # --- Aggregation Step ---
-    # Group by category and calculate average price
-    # We rename the column immediately to avoid ambiguity during the join
-    category_stats = df.groupBy("category_code").agg(
-        F.avg("price").alias("avg_category_price")
-    )
+    return df_city \
+        .filter(F.col("AverageTemperature").isNotNull()) \
+        .withColumn("year", F.year(F.col("dt"))) \
+        .groupBy("year", "Latitude") \
+        .agg(F.avg("AverageTemperature").alias("avg_temperature")) \
+        .orderBy("year", "Latitude")
 
-    # --- Join Step ---
-    # We join the original distinct events with the aggregated stats.
-    # 'left' join ensures we don't lose events if stats are missing (though unlikely here)
-    df_joined = df.join(broadcast(category_stats), on="category_code", how="left")
-
-    # --- Classification Step ---
-    # Create a new business column comparing specific price to category average
-    df_final = df_joined.withColumn(
-        "price_segment",
-        F.when(F.col("price") > F.col("avg_category_price"), "Premium")
-        .otherwise("Budget")
-    )
-
-    return df_final
-
-def generate_user_profile(df: DataFrame) -> DataFrame:
+def transform_hemisphere_comparison(df_city: DataFrame) -> DataFrame:
     """
-    Multi-level aggregation to create a User Profile.
-    Pivots the event_type to create columns: views_count, purchases_count, etc.
+    Compares average temperature between Northern and Southern Hemispheres over time.
+    Derives hemisphere from Latitude string (e.g. '57.05N' -> North).
     """
-    user_profile = df.groupBy("user_id").agg(
-        F.count("*").alias("total_activity"),
-        F.sum(F.when(F.col("event_type") == "purchase", F.col("price")).otherwise(0)).alias("total_spend"),
-        # The Pivot: turns row values ('view', 'cart') into columns
-        F.sum(F.when(F.col("event_type") == "view", 1).otherwise(0)).alias("views_count"),
-        F.sum(F.when(F.col("event_type") == "cart", 1).otherwise(0)).alias("cart_adds_count"),
-        F.sum(F.when(F.col("event_type") == "purchase", 1).otherwise(0)).alias("purchases_count")
-    )
-    
-    return user_profile
+    return df_city \
+        .filter(F.col("AverageTemperature").isNotNull()) \
+        .withColumn("year", F.year(F.col("dt"))) \
+        .withColumn("hemisphere", 
+            F.when(F.col("Latitude").endswith("N"), "North")
+             .when(F.col("Latitude").endswith("S"), "South")
+             .otherwise("Unknown")
+        ) \
+        .groupBy("year", "hemisphere") \
+        .agg(F.avg("AverageTemperature").alias("avg_temperature")) \
+        .orderBy("year", "hemisphere")

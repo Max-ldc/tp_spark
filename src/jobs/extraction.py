@@ -1,28 +1,22 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, DoubleType, TimestampType
+from pyspark.sql.types import StructType
 
-def extract_data(spark: SparkSession, file_path: str) -> DataFrame:
+def extract_data(spark: SparkSession, file_path: str, schema: StructType = None) -> DataFrame:
     """
-    Reads CSV data using a predefined schema.
-    This avoids the expensive 'inferSchema' pass.
+    Reads CSV data.
+    If a schema is provided, key-value pairs are enforced.
+    Otherwise, inferSchema is used (slower but adapts to new data).
     """
 
-    # Define the schema strictly matching the CSV columns
-    schema = StructType([
-        StructField("event_time", TimestampType(), True),
-        StructField("event_type", StringType(), True),
-        StructField("product_id", IntegerType(), True),
-        StructField("category_id", LongType(), True),
-        StructField("category_code", StringType(), True),
-        StructField("brand", StringType(), True),
-        StructField("price", DoubleType(), True),
-        StructField("user_id", IntegerType(), True),
-        StructField("user_session", StringType(), True)
-    ])
+    reader = spark.read \
+        .option("header", "true")
 
-    df = spark.read \
-        .option("header", "true") \
-        .schema(schema) \
-        .csv(file_path)
+    if schema:
+        reader = reader.schema(schema)
+    else:
+        # Default behavior: infer schema to adapt to new datasets
+        reader = reader.option("inferSchema", "true")
+
+    df = reader.csv(file_path)
 
     return df
