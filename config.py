@@ -5,7 +5,7 @@ Store your API keys and configuration here.
 
 # Windy API Configuration
 # Get your free API key from: https://api.windy.com/keys
-WINDY_API_KEY = "dT9rNPplqAZyl62aipk8KIT2ygokOZMR"  # Remplacez par votre vraie clé
+WINDY_API_KEY = "oI53YlZnCOfBlhOGK7D1mZ5xCfcN9TxD"  # Remplacez par votre vraie clé
 
 # Set to True to enable Windy data extraction
 # NOTE: Windy provides CURRENT/REAL-TIME weather data, not historical data
