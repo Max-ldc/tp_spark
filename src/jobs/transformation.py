@@ -21,7 +21,7 @@ def transform_data(df: DataFrame) -> DataFrame:
 def clean_data(df: DataFrame) -> DataFrame:
     """
     Standard cleaning: filtering null temperatures and type casting.
-    Also extracts numeric latitude from string format (e.g., "57.05N" -> 57.05, "23.45S" -> -23.45).
+    Also extracts numeric latitude/longitude from string format (e.g., "57.05N" -> 57.05, "23.45S" -> -23.45).
     """
     df_cleaned = df.filter(
         F.col("AverageTemperature").isNotNull()
@@ -35,6 +35,13 @@ def clean_data(df: DataFrame) -> DataFrame:
         .when(F.col("Latitude").endswith("S"),
               -F.regexp_replace(F.col("Latitude"), "S", "").cast("double"))
         .otherwise(None)
+    ).withColumn(
+        "longitude_numeric",
+        F.when(F.col("Longitude").endswith("E"), 
+               F.regexp_replace(F.col("Longitude"), "E", "").cast("double"))
+        .when(F.col("Longitude").endswith("W"),
+              -F.regexp_replace(F.col("Longitude"), "W", "").cast("double"))
+        .otherwise(None)
     )
     
     return df_cleaned
@@ -44,7 +51,7 @@ def aggregate_yearly_temperatures(df: DataFrame) -> DataFrame:
     Aggregate temperatures by year and city.
     This reduces the data volume from 8M rows to ~200K rows.
     """
-    df_yearly = df.groupBy("year", "City", "Country", "Latitude", "Longitude", "latitude_numeric").agg(
+    df_yearly = df.groupBy("year", "City", "Country", "Latitude", "Longitude", "latitude_numeric", "longitude_numeric").agg(
         F.avg("AverageTemperature").alias("avg_yearly_temperature"),
         F.count("*").alias("months_count")
     ).filter(F.col("months_count") >= 6)  # Keep only years with at least 6 months of data

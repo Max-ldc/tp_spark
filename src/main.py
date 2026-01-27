@@ -2,32 +2,39 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pyspark.sql import functions as F
 from utils.spark_session import get_spark_session
 from jobs.extraction import extract_data
+from jobs.extraction_windy import extract_windy_data, get_sample_locations
 from jobs.transformation import transform_data, analyze_warming_by_latitude, compare_hemispheres
+from jobs.transformation_windy import transform_windy_data, analyze_windy_by_hemisphere, analyze_windy_by_latitude
 from jobs.loading import load_data
+import config
 
 def main():
     spark = get_spark_session("Meteo")
 
-    # 1. Extract
-    # Now faster because of manual schema
-    raw_data_path = "data/raw/GlobalLandTemperaturesByCity.csv"
+    print("="*80)
+    print("PART 1: HISTORICAL DATA ANALYSIS (CSV)")
+    print("="*80)
+    
+    # 1. Extract historical data
+    raw_data_path = config.RAW_DATA_PATH
     df = extract_data(spark, raw_data_path)
 
     # 2. Transform (Enrichment)
-    print("Enriching data...")
+    print("\nEnriching historical data...")
     df_enriched = transform_data(df)
     
     # Cache because we split the pipeline here
     df_enriched.cache()
 
     # 3. Load Detailed Data
-    print("Loading detailed enriched data...")
+    print("\nLoading detailed enriched data...")
     # NOTE: We removed the .count() here. The write() is the only action we need.
-    load_data(df_enriched, "data/processed/meteo_enriched")
+    load_data(df_enriched, config.OUTPUT_PATH_METEO)
 
     # 4. Display results
     print("\n" + "="*80)
@@ -117,6 +124,71 @@ def main():
     
     print("\nWarming Rate Comparison (°C per decade):")
     hemisphere_comparison["warming"].show(truncate=False)
+    
+    print("\n" + "="*80)
+    
+    # ========================================================================
+    # PART 2: WINDY CURRENT DATA ANALYSIS
+    # ========================================================================
+    
+    if config.ENABLE_WINDY_EXTRACTION and config.WINDY_API_KEY != "YOUR_WINDY_API_KEY_HERE":
+        print("\n" + "="*80)
+        print("PART 2: CURRENT WEATHER DATA ANALYSIS (WINDY API)")
+        print("="*80)
+        
+        # Extract historical statistics for comparison
+        print("\nPreparing historical statistics for comparison...")
+        historical_stats = df_enriched.groupBy("City", "Country", "latitude_numeric").agg(
+            F.avg("avg_yearly_temperature").alias("mean_temperature"),
+            F.stddev("avg_yearly_temperature").alias("stddev_temperature")
+        ).filter(F.col("stddev_temperature").isNotNull())
+        
+        # Extract Windy current data
+        print("\nExtracting current weather data from Windy API...")
+        try:
+            locations = get_sample_locations()
+            df_windy = extract_windy_data(spark, config.WINDY_API_KEY, locations)
+            
+            if df_windy.count() > 0:
+                print(f"Successfully extracted data for {df_windy.count()} locations from Windy")
+                
+                # Transform Windy data with anomaly detection
+                print("\nAnalyzing current weather vs historical patterns...")
+                df_windy_enriched = transform_windy_data(df_windy, historical_stats)
+                
+                # Display current weather with anomaly status
+                print("\nCurrent Weather Conditions:")
+                df_windy_enriched.select(
+                    "location_name", "temperature_celsius", "mean_temperature", 
+                    "temperature_zscore", "anomaly_status", "wind_speed", "pressure"
+                ).show(truncate=False)
+                
+                # Analyze by latitude
+                print("\nCurrent Weather by Latitude Band:")
+                windy_latitude = analyze_windy_by_latitude(df_windy_enriched)
+                windy_latitude.show(truncate=False)
+                
+                # Analyze by hemisphere
+                print("\nCurrent Weather by Hemisphere:")
+                windy_hemisphere = analyze_windy_by_hemisphere(df_windy_enriched)
+                windy_hemisphere.show(truncate=False)
+                
+                # Save enriched Windy data
+                df_windy_enriched.write.mode("overwrite").parquet(config.OUTPUT_PATH_WINDY)
+                print(f"\nWindy analysis saved to {config.OUTPUT_PATH_WINDY}")
+                
+            else:
+                print("No data extracted from Windy API")
+        except Exception as e:
+            print(f"Error in Windy analysis: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    elif config.ENABLE_WINDY_EXTRACTION:
+        print("\n" + "="*80)
+        print("Windy extraction enabled but API key not configured.")
+        print("Please set your API key in config.py")
+        print("Get a free key at: https://api.windy.com/keys")
+        print("="*80)
     
     print("\n" + "="*80)
     print("ETL Job Finished Successfully.")
