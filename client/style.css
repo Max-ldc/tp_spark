@@ -1,0 +1,15 @@
+body {
+    background-color: #f8f9fa;
+}
+.card {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.table-responsive {
+    max-height: 600px;
+}
+thead th {
+    position: sticky;
+    top: 0;
+    background-color: #fff;
+    z-index: 1;
+}
