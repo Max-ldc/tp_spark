@@ -23,3 +23,18 @@ services:
       - "8000:8000"
       - "4041:4040"
     command: python src/api/main.py
+
+  # Streaming Windy (polling continu de l'API)
+  windy-streaming:
+    build: .
+    container_name: spark-windy-streaming
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    environment:
+      - WINDY_API_KEY=${WINDY_API_KEY}
+    ports:
+      - "4042:4040"
+    command: python src/streaming_main.py
+    stdin_open: true
+    tty: true

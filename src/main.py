@@ -192,17 +192,11 @@ def main():
     
     print("\n" + "="*80)
     print("ETL Job Finished Successfully.")
+    print("="*80)
 
     # Pause execution so you can check the Web UI
     input("Press Enter to finish...")
     
-    print("\nÉvolution temporelle (dernières années):")
-    df_hemisphere_evolution.filter(F.col("Year") >= 2010).show(20, truncate=False)
-
-    df_cleaned.unpersist()
-    print("\nAnalyse terminée.")
-
-    input("Appuyez sur Entrée pour terminer...")
     spark.stop()
 
 

@@ -2,6 +2,7 @@ from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 import requests
 import json
+import math
 from datetime import datetime, timedelta
 
 def extract_windy_data(spark: SparkSession, api_key: str, locations: list) -> DataFrame:
@@ -66,6 +67,19 @@ def extract_windy_data(spark: SparkSession, api_key: str, locations: list) -> Da
                 if 'ts' in data and len(data['ts']) > 0:
                     timestamp = datetime.fromtimestamp(data['ts'][0] / 1000)
                     
+                    # Extract wind components and calculate magnitude
+                    wind_u = data.get('wind_u-surface', [None])[0]
+                    wind_v = data.get('wind_v-surface', [None])[0]
+                    
+                    if wind_u is not None and wind_v is not None:
+                        # Calculate wind speed magnitude from u and v components
+                        wind_speed = (wind_u**2 + wind_v**2)**0.5
+                        # Calculate wind direction (meteorological convention: direction FROM which wind blows)
+                        wind_direction = (270 - math.degrees(math.atan2(wind_v, wind_u))) % 360
+                    else:
+                        wind_speed = None
+                        wind_direction = None
+                    
                     # According to API docs, parameters are returned as "parameter-level" format
                     weather_data.append({
                         'timestamp': timestamp,
@@ -73,8 +87,8 @@ def extract_windy_data(spark: SparkSession, api_key: str, locations: list) -> Da
                         'latitude': location['lat'],
                         'longitude': location['lon'],
                         'temperature': data.get('temp-surface', [None])[0] if 'temp-surface' in data else None,
-                        'wind_speed': data.get('wind_u-surface', [None])[0] if 'wind_u-surface' in data else None,
-                        'wind_direction': data.get('wind_v-surface', [None])[0] if 'wind_v-surface' in data else None,
+                        'wind_speed': wind_speed,
+                        'wind_direction': wind_direction,
                         'pressure': data.get('pressure-surface', [None])[0] if 'pressure-surface' in data else None,
                         'humidity': data.get('rh-surface', [None])[0] if 'rh-surface' in data else None,
                         'weather_condition': 'unknown'

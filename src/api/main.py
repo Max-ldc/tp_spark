@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI, HTTPException, Query
 from typing import Optional
 from services.spark_service import get_query_service
+from services.windy_service import get_windy_service
 
 
 app = FastAPI(
@@ -339,6 +340,138 @@ async def health_check():
 
 
 # ============================================================================
+# ENDPOINTS WINDY (Météo en Temps Réel)
+# ============================================================================
+
+@app.get("/windy/current")
+async def get_windy_current(
+    location: Optional[str] = Query(None, description="Filtrer par nom de localisation")
+):
+    """
+    Récupère les conditions météo ACTUELLES depuis l'API Windy.
+    
+    Retourne les dernières mesures avec:
+    - Température actuelle
+    - Vitesse et direction du vent
+    - Pression atmosphérique
+    - Humidité
+    - Statut d'anomalie (comparé à l'historique)
+    """
+    try:
+        service = get_windy_service()
+        data = service.get_current_weather(location=location)
+        return {
+            "count": len(data),
+            "data": data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/anomalies")
+async def get_windy_anomalies():
+    """
+    Récupère les ANOMALIES météo actuelles.
+    
+    Identifie les localisations où la température actuelle est
+    significativement différente de la moyenne historique (z-score > 2).
+    """
+    try:
+        service = get_windy_service()
+        data = service.get_current_anomalies()
+        return {
+            "count": len(data),
+            "anomalies": data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/hemispheres")
+async def get_windy_hemispheres():
+    """
+    Statistiques météo ACTUELLES par hémisphère (Nord vs Sud).
+    """
+    try:
+        service = get_windy_service()
+        return service.get_current_by_hemisphere()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/latitude-bands")
+async def get_windy_latitude_bands():
+    """
+    Statistiques météo ACTUELLES par bande de latitude.
+    
+    Groupes: Arctic, Northern Temperate, Tropical North, 
+             Tropical South, Southern Temperate, Antarctic
+    """
+    try:
+        service = get_windy_service()
+        data = service.get_current_by_latitude()
+        return {
+            "latitude_bands": data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/locations")
+async def get_windy_locations():
+    """Retourne la liste des localisations surveillées par Windy."""
+    try:
+        service = get_windy_service()
+        locations = service.get_locations()
+        return {
+            "locations": locations,
+            "count": len(locations)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/streaming/history")
+async def get_windy_streaming_history(
+    location: Optional[str] = Query(None, description="Filtrer par localisation"),
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements")
+):
+    """
+    Historique des mesures streaming (données collectées en continu).
+    
+    Retourne les mesures collectées par le service de streaming Windy,
+    triées par timestamp décroissant.
+    """
+    try:
+        service = get_windy_service()
+        data = service.get_streaming_history(location=location, limit=limit)
+        return {
+            "count": len(data),
+            "data": data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/windy/streaming/trends/{location}")
+async def get_windy_streaming_trends(
+    location: str,
+    hours: int = Query(24, ge=1, le=168, description="Nombre d'heures à analyser")
+):
+    """
+    Analyse les tendances météo sur les N dernières heures.
+    
+    Calcule statistiques (min/max/avg) et retourne la série temporelle
+    pour visualiser l'évolution de la température, vent, pression.
+    """
+    try:
+        service = get_windy_service()
+        return service.get_streaming_trends(location=location, hours=hours)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # DÉMARRAGE
 # ============================================================================
 
@@ -367,6 +500,14 @@ if __name__ == "__main__":
     print("  GET  /recent/summary    - Résumé des 10 dernières années")
     print("  GET  /recent/anomalies  - Anomalies récentes")
     print("  GET  /trends/{city}     - Tendances récentes vs historiques")
+    print("\n  -- API Windy (Temps Réel) --")
+    print("  GET  /windy/current           - Météo actuelle (toutes localisations)")
+    print("  GET  /windy/anomalies         - Anomalies météo actuelles")
+    print("  GET  /windy/hemispheres       - Stats actuelles par hémisphère")
+    print("  GET  /windy/latitude-bands    - Stats actuelles par latitude")
+    print("  GET  /windy/locations         - Localisations surveillées")
+    print("  GET  /windy/streaming/history - Historique streaming")
+    print("  GET  /windy/streaming/trends/{loc} - Tendances sur N heures")
     print("\n  GET  /health            - État de l'API")
     print("\nDocumentation : http://localhost:8000/docs")
     print("=" * 60)
