@@ -60,9 +60,9 @@ class SparkQueryService:
 
         stats = df.groupBy("City", "Country").agg(
             F.count("*").alias("count"),
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("temp_avg"),
-            F.round(F.min("avg_yearly_temperature"), 2).alias("temp_min"),
-            F.round(F.max("avg_yearly_temperature"), 2).alias("temp_max"),
+            F.round(F.avg("temperature"), 2).alias("temp_avg"),
+            F.round(F.min("temperature"), 2).alias("temp_min"),
+            F.round(F.max("temperature"), 2).alias("temp_max"),
             F.min("year").alias("year_min"),
             F.max("year").alias("year_max"),
             F.sum(F.when(F.col("is_anomaly") == True, 1).otherwise(0)).alias("anomaly_count"),
@@ -148,12 +148,12 @@ class SparkQueryService:
 
         # Calculer la tendance de réchauffement par ville
         warming = df.groupBy("City", "Country", "latitude_numeric").agg(
-            F.corr("year", "avg_yearly_temperature").alias("correlation"),
-            F.stddev("avg_yearly_temperature").alias("temp_stddev"),
+            F.corr("year", "temperature").alias("correlation"),
+            F.stddev("temperature").alias("temp_stddev"),
             F.stddev("year").alias("year_stddev"),
             F.min("year").alias("first_year"),
             F.max("year").alias("last_year"),
-            F.avg("avg_yearly_temperature").alias("mean_temp"),
+            F.avg("temperature").alias("mean_temp"),
             F.count("*").alias("num_years")
         ).filter(F.col("num_years") >= 30).withColumn(
             "warming_rate_per_decade",
@@ -172,12 +172,12 @@ class SparkQueryService:
             return []
 
         warming = df.groupBy("City", "Country", "latitude_numeric").agg(
-            F.corr("year", "avg_yearly_temperature").alias("correlation"),
-            F.stddev("avg_yearly_temperature").alias("temp_stddev"),
+            F.corr("year", "temperature").alias("correlation"),
+            F.stddev("temperature").alias("temp_stddev"),
             F.stddev("year").alias("year_stddev"),
             F.min("year").alias("first_year"),
             F.max("year").alias("last_year"),
-            F.avg("avg_yearly_temperature").alias("mean_temp"),
+            F.avg("temperature").alias("mean_temp"),
             F.count("*").alias("num_years")
         ).filter(F.col("num_years") >= 30).withColumn(
             "warming_rate_per_decade",
@@ -204,8 +204,8 @@ class SparkQueryService:
         ).filter(F.col("hemisphere").isin("North", "South"))
 
         stats = df_with_hemisphere.groupBy("hemisphere").agg(
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("avg_temp"),
-            F.round(F.stddev("avg_yearly_temperature"), 2).alias("stddev_temp"),
+            F.round(F.avg("temperature"), 2).alias("avg_temp"),
+            F.round(F.stddev("temperature"), 2).alias("stddev_temp"),
             F.countDistinct("City").alias("num_cities"),
             F.count("*").alias("total_records"),
             F.sum(F.when(F.col("is_anomaly") == True, 1).otherwise(0)).alias("anomaly_count")
@@ -233,9 +233,9 @@ class SparkQueryService:
         )
 
         stats = df_with_bands.groupBy("latitude_band").agg(
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("avg_temp"),
-            F.round(F.min("avg_yearly_temperature"), 2).alias("min_temp"),
-            F.round(F.max("avg_yearly_temperature"), 2).alias("max_temp"),
+            F.round(F.avg("temperature"), 2).alias("avg_temp"),
+            F.round(F.min("temperature"), 2).alias("min_temp"),
+            F.round(F.max("temperature"), 2).alias("max_temp"),
             F.countDistinct("City").alias("num_cities"),
             F.count("*").alias("total_records")
         ).orderBy("latitude_band")
@@ -323,12 +323,12 @@ class SparkQueryService:
 
         summary = df.filter(F.col("year") >= min_year_filter).groupBy("year").agg(
             F.countDistinct("City").alias("num_cities"),
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("global_avg_temp"),
-            F.round(F.min("avg_yearly_temperature"), 2).alias("min_temp"),
-            F.round(F.max("avg_yearly_temperature"), 2).alias("max_temp"),
+            F.round(F.avg("temperature"), 2).alias("global_avg_temp"),
+            F.round(F.min("temperature"), 2).alias("min_temp"),
+            F.round(F.max("temperature"), 2).alias("max_temp"),
             F.sum(F.when(F.col("is_anomaly") == True, 1).otherwise(0)).alias("anomaly_count"),
-            F.sum(F.when(F.col("anomaly_type") == "Exceptionally Hot", 1).otherwise(0)).alias("hot_anomalies"),
-            F.sum(F.when(F.col("anomaly_type") == "Exceptionally Cold", 1).otherwise(0)).alias("cold_anomalies")
+            F.sum(F.when(F.col("anomaly_status") == "Exceptionally Hot", 1).otherwise(0)).alias("hot_anomalies"),
+            F.sum(F.when(F.col("anomaly_status") == "Exceptionally Cold", 1).otherwise(0)).alias("cold_anomalies")
         ).orderBy(F.col("year").desc())
 
         return {
@@ -388,17 +388,17 @@ class SparkQueryService:
 
         # Stats récentes
         recent_stats = df_recent.agg(
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("avg_temp"),
-            F.round(F.min("avg_yearly_temperature"), 2).alias("min_temp"),
-            F.round(F.max("avg_yearly_temperature"), 2).alias("max_temp"),
+            F.round(F.avg("temperature"), 2).alias("avg_temp"),
+            F.round(F.min("temperature"), 2).alias("min_temp"),
+            F.round(F.max("temperature"), 2).alias("max_temp"),
             F.count("*").alias("num_years")
         ).collect()[0].asDict()
 
         # Stats historiques
         historical_stats = df_historical.agg(
-            F.round(F.avg("avg_yearly_temperature"), 2).alias("avg_temp"),
-            F.round(F.min("avg_yearly_temperature"), 2).alias("min_temp"),
-            F.round(F.max("avg_yearly_temperature"), 2).alias("max_temp"),
+            F.round(F.avg("temperature"), 2).alias("avg_temp"),
+            F.round(F.min("temperature"), 2).alias("min_temp"),
+            F.round(F.max("temperature"), 2).alias("max_temp"),
             F.count("*").alias("num_years")
         ).collect()[0].asDict()
 
