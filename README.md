@@ -54,14 +54,17 @@ Projet d'analyse de données climatiques combinant :
 │                    API REST (FastAPI)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Port 8000 - http://localhost:8000/docs                         │
+│  🔐 Authentification : JWT ou API Keys statiques                │
 │                                                                  │
-│  HISTORIQUE               │  WINDY (TEMPS RÉEL)                 │
-│  /data                    │  /windy/current                     │
-│  /stats                   │  /windy/anomalies                   │
-│  /anomalies               │  /windy/hemispheres                 │
-│  /warming/top             │  /windy/streaming/history           │
-│  /hemispheres             │  /windy/streaming/trends/{loc}      │
-│  /latitude-bands          │                                     │
+│  AUTH                     │  HISTORIQUE                          │
+│  POST /auth/token         │  /data                               │
+│                           │  /stats                              │
+│  WINDY (TEMPS RÉEL)       │  /anomalies                          │
+│  /windy/current           │  /warming/top                        │
+│  /windy/anomalies         │  /hemispheres                        │
+│  /windy/hemispheres       │  /latitude-bands                     │
+│  /windy/streaming/history │                                      │
+│  /windy/streaming/trends  │                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -127,37 +130,89 @@ docker compose up etl
 docker compose up -d api
 ```
 
+### 🔐 Authentification
+
+L'API utilise **JWT (JSON Web Tokens)** pour l'authentification. Deux méthodes disponibles :
+
+#### Option 1 : Clés API statiques (rétro-compatible)
+```bash
+# Passer la clé dans le header X-API-Key
+curl -H "X-API-Key: basic-key-001" http://localhost:8000/cities
+```
+
+#### Option 2 : JWT (recommandé)
+```bash
+# 1. Générer un JWT avec votre clé API
+curl -X POST "http://localhost:8000/auth/token?api_key=admin-key-004"
+
+# Réponse :
+# {
+#   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+#   "token_type": "bearer",
+#   "expires_in": 3600
+# }
+
+# 2. Utiliser le JWT pour vos requêtes
+curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+     http://localhost:8000/cities
+```
+
+**Clés API disponibles :**
+- `basic-key-001` → Rôle BASIC (50 résultats max)
+- `analyst-key-002` → Rôle ANALYST (200 résultats max)
+- `windy-key-003` → Rôle WINDY (200 résultats max)
+- `admin-key-004` → Rôle ADMIN (1000 résultats max, accès complet)
+
+**Hiérarchie des rôles :**
+- **BASIC** : Accès aux données de base (cities, years, countries, data)
+- **ANALYST** : BASIC + analyses historiques (anomalies, search, recent/*)
+- **WINDY** : BASIC + données temps réel (windy/*)
+- **ADMIN** : Accès complet (tous les endpoints)
+
 **Endpoints disponibles :**
+
+#### Authentification
+```bash
+# Générer un JWT (2 façons)
+curl -X POST "http://localhost:8000/auth/token?api_key=admin-key-004"
+curl -X POST -H "X-API-Key: admin-key-004" http://localhost:8000/auth/token
+```
 
 #### Données Historiques
 ```bash
-# Vue d'ensemble
-curl http://localhost:8000/stats
+# Liste des villes (BASIC)
+curl -H "X-API-Key: basic-key-001" http://localhost:8000/cities
 
-# Anomalies (années exceptionnellement chaudes/froides)
-curl http://localhost:8000/anomalies
+# Vue d'ensemble (ADMIN)
+curl -H "X-API-Key: admin-key-004" http://localhost:8000/stats
 
-# Villes qui se réchauffent le plus
-curl http://localhost:8000/warming/top
+# Anomalies (ANALYST)
+curl -H "X-API-Key: analyst-key-002" http://localhost:8000/anomalies
 
-# Comparaison Nord vs Sud
-curl http://localhost:8000/hemispheres
+# Villes qui se réchauffent le plus (ADMIN)
+curl -H "X-API-Key: admin-key-004" http://localhost:8000/warming/top
+
+# Comparaison Nord vs Sud (ADMIN)
+curl -H "X-API-Key: admin-key-004" http://localhost:8000/hemispheres
 ```
 
 #### Données Temps Réel (Windy)
 ```bash
-# Météo actuelle toutes localisations
-curl http://localhost:8000/windy/current
+# Météo actuelle toutes localisations (WINDY)
+curl -H "X-API-Key: windy-key-003" http://localhost:8000/windy/current
 
-# Anomalies météo détectées maintenant
-curl http://localhost:8000/windy/anomalies
+# Anomalies météo détectées maintenant (WINDY)
+curl -H "X-API-Key: windy-key-003" http://localhost:8000/windy/anomalies
 
-# Stats par hémisphère (temps réel)
-curl http://localhost:8000/windy/hemispheres
+# Stats par hémisphère temps réel (WINDY)
+curl -H "X-API-Key: windy-key-003" http://localhost:8000/windy/hemispheres
 ```
 
 **Documentation interactive :**
 http://localhost:8000/docs
+
+**Swagger avec endpoints admin :**
+http://localhost:8000/docs?key=admin-key-004
 
 ### 3. Streaming Continu
 
@@ -266,7 +321,8 @@ tp_spark/
 
 - **Apache Spark 4.1.1** : Traitement distribué
 - **PySpark** : API Python pour Spark
-- **FastAPI** : API REST moderne
+- **FastAPI** : API REST moderne avec authentification JWT
+- **PyJWT** : Gestion des JSON Web Tokens
 - **Docker** : Conteneurisation
 - **Parquet** : Format de stockage columnaire optimisé
 - **Windy API** : Données météo temps réel
@@ -328,10 +384,16 @@ docker compose up etl
 # 2. Lancer API
 docker compose up -d api
 
-# 3. Tester
-curl http://localhost:8000/health
-curl http://localhost:8000/stats
-curl http://localhost:8000/windy/current
+# 3. Générer un JWT
+curl -X POST "http://localhost:8000/auth/token?api_key=admin-key-004"
+
+# 4. Tester avec JWT (remplacer <TOKEN> par le access_token reçu)
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/health
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/stats
+curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/windy/current
+
+# 5. Ou tester avec clé API directe
+curl -H "X-API-Key: admin-key-004" http://localhost:8000/health
 ```
 
 ## 🐛 Dépannage
