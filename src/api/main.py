@@ -10,17 +10,143 @@ if platform.system() == "Windows":
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security
+from fastapi.security import APIKeyHeader
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional
 from services.spark_service import get_query_service
 from services.windy_service import get_windy_service
 
 
+# ============================================================================
+# CONFIGURATION API KEYS
+# ============================================================================
+
+# Rôles disponibles et leur hiérarchie d'accès
+# BASIC    : Socle commun (données de base)
+# ANALYST  : Analyse historique (inclut BASIC)
+# WINDY    : Temps réel Windy (inclut BASIC)
+# ADMIN    : Accès complet (inclut tout)
+ROLE_HIERARCHY = {
+    "BASIC": {"BASIC"},
+    "ANALYST": {"BASIC", "ANALYST"},
+    "WINDY": {"BASIC", "WINDY"},
+    "ADMIN": {"BASIC", "ANALYST", "WINDY", "ADMIN"},
+}
+
+# Clés API valides (en production, utiliser une base de données ou env vars)
+VALID_API_KEYS = {
+    "basic-key-001": {"name": "Basic User", "role": "BASIC", "max_results": 50},
+    "analyst-key-002": {"name": "Analyst User", "role": "ANALYST", "max_results": 200},
+    "windy-key-003": {"name": "Windy User", "role": "WINDY", "max_results": 200},
+    "admin-key-004": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
+}
+
+# Header pour l'API Key
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> dict:
+    """
+    Exige une API key valide.
+    Retourne les infos de la clé avec son rôle.
+    """
+    if api_key is None:
+        raise HTTPException(
+            status_code=401,
+            detail="API Key requise. Ajoutez le header 'X-API-Key'"
+        )
+    if api_key not in VALID_API_KEYS:
+        raise HTTPException(
+            status_code=403,
+            detail="Clé API invalide"
+        )
+    return {"key": api_key, **VALID_API_KEYS[api_key]}
+
+
+def require_role(api_info: dict, required_zone: str):
+    """
+    Vérifie que le rôle de l'utilisateur donne accès à la zone demandée.
+    Lève une 403 si le rôle est insuffisant.
+    """
+    user_role = api_info.get("role", "BASIC")
+    allowed_zones = ROLE_HIERARCHY.get(user_role, set())
+    if required_zone not in allowed_zones:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Accès refusé. Rôle '{user_role}' insuffisant, zone '{required_zone}' requise."
+        )
+
+
+def limit_results(data: list, api_info: dict) -> list:
+    """Limite le nombre de résultats selon le niveau de l'API key."""
+    max_results = api_info.get("max_results", 3)
+    return data[:max_results]
+
+
 app = FastAPI(
     title="Temperature Query API",
     description="API pour requêter les données de température enrichies par Spark",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+# Endpoints bêta (NOT WORKING) - masqués du Swagger sauf pour ADMIN
+BETA_PATHS = {
+    "/stats", "/warming/top", "/warming/cooling",
+    "/hemispheres", "/latitude-bands", "/trends/{city}",
+    "/recent/summary", "/windy/streaming/trends/{location}",
+}
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def custom_openapi(api_key: Optional[str] = Security(api_key_header)):
+    """Génère le schéma OpenAPI filtré selon le rôle."""
+    show_beta = False
+    if api_key and api_key in VALID_API_KEYS:
+        role = VALID_API_KEYS[api_key]["role"]
+        if "ADMIN" in ROLE_HIERARCHY.get(role, set()):
+            show_beta = True
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    if not show_beta:
+        schema["paths"] = {
+            path: ops for path, ops in schema["paths"].items()
+            if path not in BETA_PATHS
+        }
+
+    return JSONResponse(schema)
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_docs():
+    """Swagger UI custom."""
+    return HTMLResponse("""<!DOCTYPE html>
+<html><head>
+<title>Temperature Query API - Docs</title>
+<link rel="stylesheet" type="text/css"
+      href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+    url: "/openapi.json",
+    dom_id: '#swagger-ui',
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+    layout: "BaseLayout"
+})
+</script>
+</body></html>""")
 
 
 # ============================================================================
@@ -30,17 +156,22 @@ app = FastAPI(
 @app.get("/data")
 async def get_data(
     city: Optional[str] = Query(None, description="Filtrer par ville"),
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements")
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les données température par année/ville.
+    🔐 Zone BASIC
     """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         data = service.get_data(city=city, limit=limit)
+        data = limit_results(data, api_info)
         return {
             "count": len(data),
-            "data": data
+            "data": data,
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -48,19 +179,24 @@ async def get_data(
 
 @app.get("/stats")
 async def get_stats(
-    city: Optional[str] = Query(None, description="Filtrer par ville")
+    city: Optional[str] = Query(None, description="Filtrer par ville"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Calcule les statistiques agrégées par ville.
+    🔐 Zone ADMIN
 
     Retourne :
     - Température moyenne, min, max
     - Années couvertes
     - Nombre d'anomalies
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         stats = service.get_stats(city=city)
+        if isinstance(stats, list):
+            stats = limit_results(stats, api_info)
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -69,25 +205,34 @@ async def get_stats(
 @app.get("/anomalies")
 async def get_anomalies(
     anomaly_type: Optional[str] = Query(None, description="Type: 'Exceptionally Hot' ou 'Exceptionally Cold'"),
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements")
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les anomalies de température (années exceptionnellement chaudes ou froides).
+    🔐 Zone ANALYST
     """
+    require_role(api_info, "ANALYST")
     try:
         service = get_query_service()
         data = service.get_anomalies(anomaly_type=anomaly_type, limit=limit)
+        data = limit_results(data, api_info)
         return {
             "count": len(data),
-            "data": data
+            "data": data,
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/cities")
-async def get_cities():
-    """Retourne la liste des villes disponibles."""
+async def get_cities(api_info: dict = Security(require_api_key)):
+    """
+    Retourne la liste des villes disponibles.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         cities = service.get_cities()
@@ -97,8 +242,12 @@ async def get_cities():
 
 
 @app.get("/years")
-async def get_years():
-    """Retourne la liste des années disponibles."""
+async def get_years(api_info: dict = Security(require_api_key)):
+    """
+    Retourne la liste des années disponibles.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         years = service.get_years()
@@ -108,8 +257,12 @@ async def get_years():
 
 
 @app.get("/countries")
-async def get_countries():
-    """Retourne la liste des pays disponibles."""
+async def get_countries(api_info: dict = Security(require_api_key)):
+    """
+    Retourne la liste des pays disponibles.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         countries = service.get_countries()
@@ -121,13 +274,19 @@ async def get_countries():
 @app.get("/data/year/{year}")
 async def get_data_by_year(
     year: int,
-    limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements")
+    limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
-    """Récupère les données pour une année spécifique."""
+    """
+    Récupère les données pour une année spécifique.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         data = service.get_data_by_year(year=year, limit=limit)
-        return {"year": year, "count": len(data), "data": data}
+        data = limit_results(data, api_info)
+        return {"year": year, "count": len(data), "data": data, "limited_to": api_info.get("max_results")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -135,54 +294,69 @@ async def get_data_by_year(
 @app.get("/data/country/{country}")
 async def get_data_by_country(
     country: str,
-    limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements")
+    limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
-    """Récupère les données pour un pays spécifique."""
+    """
+    Récupère les données pour un pays spécifique.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         data = service.get_data_by_country(country=country, limit=limit)
-        return {"country": country, "count": len(data), "data": data}
+        data = limit_results(data, api_info)
+        return {"country": country, "count": len(data), "data": data, "limited_to": api_info.get("max_results")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/warming/top")
 async def get_warming_top(
-    limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner")
+    limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Retourne les villes qui se réchauffent le plus rapidement.
+    🔐 Zone ADMIN
 
     Calcule le taux de réchauffement par décennie basé sur la corrélation
     entre l'année et la température moyenne.
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         data = service.get_warming_top(limit=limit)
-        return {"count": len(data), "data": data}
+        data = limit_results(data, api_info)
+        return {"count": len(data), "data": data, "limited_to": api_info.get("max_results")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/warming/cooling")
 async def get_warming_cooling(
-    limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner")
+    limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Retourne les villes qui refroidissent (taux de réchauffement négatif).
+    🔐 Zone ADMIN
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         data = service.get_warming_cooling(limit=limit)
-        return {"count": len(data), "data": data}
+        data = limit_results(data, api_info)
+        return {"count": len(data), "data": data, "limited_to": api_info.get("max_results")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/hemispheres")
-async def get_hemispheres_comparison():
+async def get_hemispheres_comparison(api_info: dict = Security(require_api_key)):
     """
     Compare les statistiques de température entre les hémisphères Nord et Sud.
+    🔐 Zone ADMIN
 
     Retourne :
     - Température moyenne par hémisphère
@@ -190,6 +364,7 @@ async def get_hemispheres_comparison():
     - Nombre de villes et d'enregistrements
     - Nombre d'anomalies
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         data = service.get_hemispheres_comparison()
@@ -199,9 +374,10 @@ async def get_hemispheres_comparison():
 
 
 @app.get("/latitude-bands")
-async def get_latitude_bands():
+async def get_latitude_bands(api_info: dict = Security(require_api_key)):
     """
     Statistiques par bande de latitude.
+    🔐 Requiert une API Key (header X-API-Key)
 
     Bandes :
     - Arctic (60°+)
@@ -211,6 +387,7 @@ async def get_latitude_bands():
     - Southern Temperate (30-60°)
     - Antarctic (60°-)
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         data = service.get_latitude_bands()
@@ -222,17 +399,21 @@ async def get_latitude_bands():
 @app.get("/search")
 async def search_cities(
     q: str = Query(..., min_length=2, description="Terme de recherche (min 2 caractères)"),
-    limit: int = Query(50, ge=1, le=200, description="Nombre max de résultats")
+    limit: int = Query(50, ge=1, le=200, description="Nombre max de résultats"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Recherche de villes par nom partiel.
+    🔐 Zone ANALYST
 
     Exemple : /search?q=Par retourne Paris, Paraná, etc.
     """
+    require_role(api_info, "ANALYST")
     try:
         service = get_query_service()
         data = service.search_cities(query=q, limit=limit)
-        return {"query": q, "count": len(data), "results": data}
+        data = limit_results(data, api_info)
+        return {"query": q, "count": len(data), "results": data, "limited_to": api_info.get("max_results")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -243,16 +424,24 @@ async def search_cities(
 
 @app.get("/recent/latest")
 async def get_latest_data(
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements")
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les données de l'année la plus récente.
+    🔐 Zone ANALYST
 
     Utile pour voir les dernières données ingérées par Spark.
     """
+    require_role(api_info, "ANALYST")
     try:
         service = get_query_service()
-        return service.get_latest_data(limit=limit)
+        result = service.get_latest_data(limit=limit)
+        if "data" in result and isinstance(result["data"], list):
+            result["data"] = limit_results(result["data"], api_info)
+            result["count"] = len(result["data"])
+            result["limited_to"] = api_info.get("max_results")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -260,22 +449,31 @@ async def get_latest_data(
 @app.get("/recent/years")
 async def get_recent_years(
     num_years: int = Query(5, ge=1, le=20, description="Nombre d'années récentes"),
-    limit: int = Query(500, ge=1, le=2000, description="Nombre max d'enregistrements")
+    limit: int = Query(500, ge=1, le=2000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les données des N dernières années.
+    🔐 Zone ANALYST
     """
+    require_role(api_info, "ANALYST")
     try:
         service = get_query_service()
-        return service.get_recent_years(num_years=num_years, limit=limit)
+        result = service.get_recent_years(num_years=num_years, limit=limit)
+        if "data" in result and isinstance(result["data"], list):
+            result["data"] = limit_results(result["data"], api_info)
+            result["count"] = len(result["data"])
+            result["limited_to"] = api_info.get("max_results")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/recent/summary")
-async def get_recent_summary():
+async def get_recent_summary(api_info: dict = Security(require_api_key)):
     """
     Résumé des 10 dernières années.
+    🔐 Zone ADMIN (bêta)
 
     Retourne pour chaque année :
     - Nombre de villes
@@ -283,9 +481,14 @@ async def get_recent_summary():
     - Min/Max température
     - Nombre d'anomalies (chaudes/froides)
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
-        return service.get_recent_summary()
+        result = service.get_recent_summary()
+        if "yearly_summary" in result and isinstance(result["yearly_summary"], list):
+            result["yearly_summary"] = limit_results(result["yearly_summary"], api_info)
+            result["limited_to"] = api_info.get("max_results")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -293,28 +496,38 @@ async def get_recent_summary():
 @app.get("/recent/anomalies")
 async def get_recent_anomalies(
     num_years: int = Query(5, ge=1, le=20, description="Nombre d'années récentes"),
-    limit: int = Query(50, ge=1, le=200, description="Nombre max d'anomalies")
+    limit: int = Query(50, ge=1, le=200, description="Nombre max d'anomalies"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les anomalies des N dernières années.
+    🔐 Zone ANALYST
 
     Triées par intensité (z-score le plus extrême en premier).
     """
+    require_role(api_info, "ANALYST")
     try:
         service = get_query_service()
-        return service.get_recent_anomalies(num_years=num_years, limit=limit)
+        result = service.get_recent_anomalies(num_years=num_years, limit=limit)
+        if "data" in result and isinstance(result["data"], list):
+            result["data"] = limit_results(result["data"], api_info)
+            result["count"] = len(result["data"])
+            result["limited_to"] = api_info.get("max_results")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/trends/{city}")
-async def get_city_trends(city: str):
+async def get_city_trends(city: str, api_info: dict = Security(require_api_key)):
     """
     Compare les tendances récentes vs historiques pour une ville.
+    🔐 Zone ADMIN
 
     Compare les 20 dernières années avec la période précédente
     pour voir l'évolution de la température.
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_query_service()
         return service.get_trends_comparison(city=city)
@@ -323,8 +536,12 @@ async def get_city_trends(city: str):
 
 
 @app.get("/health")
-async def health_check():
-    """Vérifie que l'API et Spark fonctionnent."""
+async def health_check(api_info: dict = Security(require_api_key)):
+    """
+    Vérifie que l'API et Spark fonctionnent.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
     try:
         service = get_query_service()
         return {
@@ -345,11 +562,13 @@ async def health_check():
 
 @app.get("/windy/current")
 async def get_windy_current(
-    location: Optional[str] = Query(None, description="Filtrer par nom de localisation")
+    location: Optional[str] = Query(None, description="Filtrer par nom de localisation"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Récupère les conditions météo ACTUELLES depuis l'API Windy.
-    
+    🔐 Zone WINDY
+
     Retourne les dernières mesures avec:
     - Température actuelle
     - Vitesse et direction du vent
@@ -357,41 +576,50 @@ async def get_windy_current(
     - Humidité
     - Statut d'anomalie (comparé à l'historique)
     """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         data = service.get_current_weather(location=location)
+        data = limit_results(data, api_info)
         return {
             "count": len(data),
-            "data": data
+            "data": data,
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/windy/anomalies")
-async def get_windy_anomalies():
+async def get_windy_anomalies(api_info: dict = Security(require_api_key)):
     """
     Récupère les ANOMALIES météo actuelles.
-    
+    🔐 Requiert une API Key (header X-API-Key)
+
     Identifie les localisations où la température actuelle est
     significativement différente de la moyenne historique (z-score > 2).
     """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         data = service.get_current_anomalies()
+        data = limit_results(data, api_info)
         return {
             "count": len(data),
-            "anomalies": data
+            "anomalies": data,
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/windy/hemispheres")
-async def get_windy_hemispheres():
+async def get_windy_hemispheres(api_info: dict = Security(require_api_key)):
     """
     Statistiques météo ACTUELLES par hémisphère (Nord vs Sud).
+    🔐 Zone WINDY
     """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         return service.get_current_by_hemisphere()
@@ -400,13 +628,15 @@ async def get_windy_hemispheres():
 
 
 @app.get("/windy/latitude-bands")
-async def get_windy_latitude_bands():
+async def get_windy_latitude_bands(api_info: dict = Security(require_api_key)):
     """
     Statistiques météo ACTUELLES par bande de latitude.
-    
-    Groupes: Arctic, Northern Temperate, Tropical North, 
+    🔐 Zone WINDY
+
+    Groupes: Arctic, Northern Temperate, Tropical North,
              Tropical South, Southern Temperate, Antarctic
     """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         data = service.get_current_by_latitude()
@@ -418,14 +648,20 @@ async def get_windy_latitude_bands():
 
 
 @app.get("/windy/locations")
-async def get_windy_locations():
-    """Retourne la liste des localisations surveillées par Windy."""
+async def get_windy_locations(api_info: dict = Security(require_api_key)):
+    """
+    Retourne la liste des localisations surveillées par Windy.
+    🔐 Zone WINDY
+    """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         locations = service.get_locations()
+        locations = limit_results(locations, api_info)
         return {
             "locations": locations,
-            "count": len(locations)
+            "count": len(locations),
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -434,20 +670,25 @@ async def get_windy_locations():
 @app.get("/windy/streaming/history")
 async def get_windy_streaming_history(
     location: Optional[str] = Query(None, description="Filtrer par localisation"),
-    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements")
+    limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Historique des mesures streaming (données collectées en continu).
-    
+    🔐 Zone WINDY
+
     Retourne les mesures collectées par le service de streaming Windy,
     triées par timestamp décroissant.
     """
+    require_role(api_info, "WINDY")
     try:
         service = get_windy_service()
         data = service.get_streaming_history(location=location, limit=limit)
+        data = limit_results(data, api_info)
         return {
             "count": len(data),
-            "data": data
+            "data": data,
+            "limited_to": api_info.get("max_results")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -456,17 +697,24 @@ async def get_windy_streaming_history(
 @app.get("/windy/streaming/trends/{location}")
 async def get_windy_streaming_trends(
     location: str,
-    hours: int = Query(24, ge=1, le=168, description="Nombre d'heures à analyser")
+    hours: int = Query(24, ge=1, le=168, description="Nombre d'heures à analyser"),
+    api_info: dict = Security(require_api_key)
 ):
     """
     Analyse les tendances météo sur les N dernières heures.
-    
+    🔐 Zone ADMIN (bêta)
+
     Calcule statistiques (min/max/avg) et retourne la série temporelle
     pour visualiser l'évolution de la température, vent, pression.
     """
+    require_role(api_info, "ADMIN")
     try:
         service = get_windy_service()
-        return service.get_streaming_trends(location=location, hours=hours)
+        result = service.get_streaming_trends(location=location, hours=hours)
+        if "time_series" in result and isinstance(result["time_series"], list):
+            result["time_series"] = limit_results(result["time_series"], api_info)
+            result["limited_to"] = api_info.get("max_results")
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
