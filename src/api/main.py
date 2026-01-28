@@ -10,11 +10,13 @@ if platform.system() == "Windows":
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, Query, Security
+from fastapi import FastAPI, HTTPException, Query, Security, Request
 from fastapi.security import APIKeyHeader
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional
+import jwt
+from datetime import datetime, timedelta, timezone
 from services.spark_service import get_query_service
 from services.windy_service import get_windy_service
 
@@ -43,19 +45,41 @@ VALID_API_KEYS = {
     "admin-key-004": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
 }
 
+# Configuration JWT
+JWT_SECRET = "spark-api-secret-key-change-in-production"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 1
+
 # Header pour l'API Key
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> dict:
+async def require_api_key(request: Request, api_key: Optional[str] = Security(api_key_header)) -> dict:
     """
-    Exige une API key valide.
-    Retourne les infos de la clé avec son rôle.
+    Authentification par JWT (Bearer token) ou API Key statique.
+    Priority : Bearer token > X-API-Key header.
     """
+    # 1. Vérifier le Bearer token
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            return {
+                "name": payload["name"],
+                "role": payload["role"],
+                "max_results": payload["max_results"],
+            }
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token expiré")
+        except jwt.InvalidTokenError:
+            raise HTTPException(status_code=401, detail="Token invalide")
+
+    # 2. Sinon, vérifier l'API Key statique
     if api_key is None:
         raise HTTPException(
             status_code=401,
-            detail="API Key requise. Ajoutez le header 'X-API-Key'"
+            detail="Authentification requise. Utilisez 'Authorization: Bearer <token>' ou 'X-API-Key'"
         )
     if api_key not in VALID_API_KEYS:
         raise HTTPException(
@@ -103,11 +127,12 @@ BETA_PATHS = {
 
 
 @app.get("/openapi.json", include_in_schema=False)
-async def custom_openapi(api_key: Optional[str] = Security(api_key_header)):
+async def custom_openapi(key: Optional[str] = Query(None)):
     """Génère le schéma OpenAPI filtré selon le rôle."""
+    resolved_key = key
     show_beta = False
-    if api_key and api_key in VALID_API_KEYS:
-        role = VALID_API_KEYS[api_key]["role"]
+    if resolved_key and resolved_key in VALID_API_KEYS:
+        role = VALID_API_KEYS[resolved_key]["role"]
         if "ADMIN" in ROLE_HIERARCHY.get(role, set()):
             show_beta = True
 
@@ -124,13 +149,44 @@ async def custom_openapi(api_key: Optional[str] = Security(api_key_header)):
             if path not in BETA_PATHS
         }
 
+    # Ajouter le schéma de sécurité Bearer pour Swagger UI
+    schema["components"] = schema.get("components", {})
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Entrez le JWT obtenu via POST /auth/token"
+        },
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Clé API statique"
+        }
+    }
+    
+    # Appliquer les schémas de sécurité à tous les endpoints (sauf /auth/token)
+    for path, path_item in schema.get("paths", {}).items():
+        for method, operation in path_item.items():
+            if method in ["get", "post", "put", "delete", "patch"]:
+                if path != "/auth/token":
+                    operation["security"] = [
+                        {"BearerAuth": []},
+                        {"ApiKeyAuth": []}
+                    ]
+
     return JSONResponse(schema)
 
 
 @app.get("/docs", include_in_schema=False)
-async def custom_docs():
-    """Swagger UI custom."""
-    return HTMLResponse("""<!DOCTYPE html>
+async def custom_docs(key: Optional[str] = Query(None)):
+    """Swagger UI. Passer ?key=ADMIN_KEY pour voir les endpoints bêta."""
+    openapi_url = "/openapi.json"
+    if key:
+        openapi_url = f"/openapi.json?key={key}"
+
+    return HTMLResponse(f"""<!DOCTYPE html>
 <html><head>
 <title>Temperature Query API - Docs</title>
 <link rel="stylesheet" type="text/css"
@@ -139,14 +195,65 @@ async def custom_docs():
 <div id="swagger-ui"></div>
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
-SwaggerUIBundle({
-    url: "/openapi.json",
+SwaggerUIBundle({{
+    url: "{openapi_url}",
     dom_id: '#swagger-ui',
     presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
     layout: "BaseLayout"
-})
+}})
 </script>
 </body></html>""")
+
+
+# ============================================================================
+# ENDPOINTS D'AUTHENTIFICATION
+# ============================================================================
+
+@app.post("/auth/token")
+async def get_token(
+    api_key: Optional[str] = Query(None, description="Clé API (peut aussi être passée en header X-API-Key)"),
+    header_key: Optional[str] = Security(api_key_header)
+):
+    """
+    Génère un JWT à partir d'une clé API statique valide.
+    
+    La clé API peut être passée soit :
+    - En paramètre query : POST /auth/token?api_key=votre-cle
+    - Dans le header X-API-Key
+    
+    Retourne un token JWT valide pour 1 heure.
+    """
+    # Prioriser le paramètre query, sinon utiliser le header
+    resolved_key = api_key or header_key
+    
+    if resolved_key is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Clé API requise (paramètre 'api_key' ou header 'X-API-Key')"
+        )
+    if resolved_key not in VALID_API_KEYS:
+        raise HTTPException(
+            status_code=403,
+            detail="Clé API invalide"
+        )
+    
+    user_info = VALID_API_KEYS[resolved_key]
+    expiration = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    
+    payload = {
+        "name": user_info["name"],
+        "role": user_info["role"],
+        "max_results": user_info["max_results"],
+        "exp": expiration
+    }
+    
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": JWT_EXPIRATION_HOURS * 3600
+    }
 
 
 # ============================================================================
