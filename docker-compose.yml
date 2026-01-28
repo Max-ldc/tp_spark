@@ -1,0 +1,40 @@
+services:
+  # Job ETL batch (analyse des températures)
+  etl:
+    build: .
+    container_name: spark-etl
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    ports:
+      - "4040:4040"
+    command: python src/main.py
+    stdin_open: true
+    tty: true
+
+  # API de requêtage
+  api:
+    build: .
+    container_name: spark-api
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    ports:
+      - "8000:8000"
+      - "4041:4040"
+    command: python src/api/main.py
+
+  # Streaming Windy (polling continu de l'API)
+  windy-streaming:
+    build: .
+    container_name: spark-windy-streaming
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    environment:
+      - WINDY_API_KEY=${WINDY_API_KEY}
+    ports:
+      - "4042:4040"
+    command: python src/streaming_main.py
+    stdin_open: true
+    tty: true

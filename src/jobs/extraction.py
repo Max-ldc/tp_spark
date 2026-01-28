@@ -1,23 +1,19 @@
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, LongType, DoubleType, TimestampType
+from pyspark.sql.types import StructType, StructField, StringType
 
 def extract_data(spark: SparkSession, file_path: str) -> DataFrame:
     """
-    Reads CSV data using a predefined schema.
-    This avoids the expensive 'inferSchema' pass.
+    Reads CSV data by dynamically creating schema from CSV headers.
+    All columns are read as StringType.
     """
 
-    # Define the schema strictly matching the CSV columns
+    # Read the first line to get headers
+    with open(file_path, 'r') as f:
+        headers = f.readline().strip().split(',')
+    
+    # Create schema dynamically from headers
     schema = StructType([
-        StructField("event_time", TimestampType(), True),
-        StructField("event_type", StringType(), True),
-        StructField("product_id", IntegerType(), True),
-        StructField("category_id", LongType(), True),
-        StructField("category_code", StringType(), True),
-        StructField("brand", StringType(), True),
-        StructField("price", DoubleType(), True),
-        StructField("user_id", IntegerType(), True),
-        StructField("user_session", StringType(), True)
+        StructField(header, StringType(), True) for header in headers
     ])
 
     df = spark.read \
