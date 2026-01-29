@@ -39,10 +39,10 @@ ROLE_HIERARCHY = {
 
 # Clés API valides (en production, utiliser une base de données ou env vars)
 VALID_API_KEYS = {
-    "basic-key-001": {"name": "Basic User", "role": "BASIC", "max_results": 50},
-    "analyst-key-002": {"name": "Analyst User", "role": "ANALYST", "max_results": 200},
-    "windy-key-003": {"name": "Windy User", "role": "WINDY", "max_results": 200},
-    "admin-key-004": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
+    "IkJBU0lDIiwgIm1heF9yZXN1bHRzIjogNTA=": {"name": "Basic User", "role": "BASIC", "max_results": 50},
+    "IkFOQUxZU1QiLCAibWF4X3Jlc3VsdHMiOiAyMDA=": {"name": "Analyst User", "role": "ANALYST", "max_results": 200},
+    "IldJTkRZIiwgIm1heF9yZXN1bHRzIjogMjAw": {"name": "Windy User", "role": "WINDY", "max_results": 200},
+    "IkFETUlOIiwgIm1heF9yZXN1bHRzIjogMTAwMA==": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
 }
 
 # Configuration JWT
