@@ -1,9 +1,18 @@
-// Configuration Keycloak
+// Configuration Keycloak - URL dynamique
+const getKeycloakUrl = () => {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:8080/';
+    }
+    return `http://${window.location.hostname}:8080/`;
+};
+
 const keycloakConfig = {
-    url: 'http://localhost:8080/',
+    url: getKeycloakUrl(),
     realm: 'temperature-api',
     clientId: 'temperature-frontend'
 };
+
+console.log('Keycloak URL:', keycloakConfig.url);
 
 // Configuration API - détection automatique
 const getApiUrl = () => {
@@ -24,11 +33,8 @@ let currentUser = null;
 
 // Initialisation au chargement de la page
 document.addEventListener('DOMContentLoaded', () => {
-    // Désactiver Keycloak temporairement - afficher directement les méthodes d'auth
+    // Afficher les méthodes d'auth immédiatement (pas d'attente Keycloak)
     showAuthMethods();
-
-    // Décommenter pour réactiver Keycloak :
-    // initKeycloak();
 });
 
 // Initialiser Keycloak
