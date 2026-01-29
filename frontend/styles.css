@@ -47,6 +47,7 @@ body {
         opacity: 0;
         transform: translateY(30px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -64,8 +65,13 @@ body {
 }
 
 @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 h1 {
@@ -99,7 +105,9 @@ h1 {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .auth-methods h2 {
@@ -192,6 +200,7 @@ h1 {
         opacity: 0;
         transform: translateY(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -213,7 +222,9 @@ h1 {
     border-color: var(--primary);
 }
 
-.submit-btn, .cancel-btn, .dashboard-btn {
+.submit-btn,
+.cancel-btn,
+.dashboard-btn {
     width: 100%;
     padding: 14px;
     border: none;
@@ -256,8 +267,13 @@ h1 {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .success-icon {
@@ -278,6 +294,7 @@ h1 {
     from {
         transform: scale(0);
     }
+
     to {
         transform: scale(1);
     }
@@ -343,16 +360,150 @@ h1 {
     opacity: 0.7;
 }
 
+/* --- Nouveaux Styles Authentification --- */
+
+.auth-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+}
+
+.tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    color: var(--text-light);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tab-btn.active {
+    background: white;
+    color: var(--primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.auth-section {
+    display: none;
+}
+
+.auth-section.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.login-btn {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.login-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+.login-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+
+/* Drop Zone */
+.drop-zone {
+    height: 140px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    cursor: pointer;
+    color: var(--text-light);
+    border: 2px dashed var(--primary);
+    border-radius: 16px;
+    transition: all 0.3s ease;
+    background: rgba(102, 126, 234, 0.03);
+    margin: 10px 0;
+}
+
+.drop-zone:hover,
+.drop-zone--over {
+    background: rgba(102, 126, 234, 0.08);
+    border-style: solid;
+}
+
+.drop-zone__input {
+    display: none;
+}
+
+.drop-zone__prompt {
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.file-info {
+    margin-top: 10px;
+    padding: 12px 16px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    border-radius: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #059669;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.remove-file {
+    background: rgba(239, 68, 68, 0.1);
+    border: none;
+    color: var(--danger);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: all 0.2s;
+}
+
+.remove-file:hover {
+    background: var(--danger);
+    color: white;
+}
+
 /* Responsive */
 @media (max-width: 480px) {
     .login-card {
         padding: 30px 24px;
     }
-    
+
     h1 {
         font-size: 24px;
     }
-    
+
     .auth-button {
         padding: 16px;
     }

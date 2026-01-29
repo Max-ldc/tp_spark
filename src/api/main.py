@@ -323,6 +323,9 @@ async def validate_certificate(
     
     return {
         **token_response,
+        "name": cn,
+        "role": role,
+        "max_results": max_results,
         "certificate_info": {
             "cn": cn,
             "role": role,

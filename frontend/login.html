@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CESI Temperature API - Connexion</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
     <!-- Keycloak supprimé -->
 </head>
 
@@ -31,24 +31,40 @@
             </div>
 
             <div id="auth-section">
-                <div class="api-key-form" id="api-key-form" style="display: block;">
-                    <div class="form-group">
-                        <label for="api-key-input">Entrez votre Clé API</label>
-                        <input type="text" id="api-key-input" placeholder="ex: basic-key-001" class="api-key-input">
-                    </div>
-
-                    <button class="submit-btn" onclick="loginWithApiKey()">Se connecter</button>
-
-                    <!-- <div class="help-text">
-                        <p>Clés de démo disponibles :</p>
-                        <ul>
-                            <li><strong>BASIC:</strong> <code>IkJBU0lDIiwgIm1heF9yZXN1bHRzIjogNTA=</code></li>
-                            <li><strong>ANALYST:</strong> <code>IkFOQUxZU1QiLCAibWF4X3Jlc3VsdHMiOiAyMDA=</code></li>
-                            <li><strong>WINDY:</strong> <code>IldJTkRZIiwgIm1heF9yZXN1bHRzIjogMjAw</code></li>
-                            <li><strong>ADMIN:</strong> <code>IkFETUlOIiwgIm1heF9yZXN1bHRzIjogMTAwMA==</code></li>
-                        </ul>
-                    </div> -->
+                <!-- Onglets de connexion -->
+                <div class="auth-tabs">
+                    <button id="tab-apikey" class="tab-btn active" onclick="switchTab('apikey')">Clé API</button>
+                    <button id="tab-cert" class="tab-btn" onclick="switchTab('cert')">Certificat X.509</button>
                 </div>
+
+                <!-- Formulaire Clé API -->
+                <div id="apikey-section" class="auth-section active">
+                    <div class="form-group">
+                        <label for="api-key">Votre Clé API</label>
+                        <input type="password" id="api-key" placeholder="Entrez votre clé API...">
+
+                    </div>
+                    <button class="login-btn" id="login-apikey-btn" onclick="loginWithApiKey()">Se connecter</button>
+                </div>
+
+                <!-- Formulaire Certificat -->
+                <div id="cert-section" class="auth-section">
+                    <div class="form-group">
+                        <label>Sélectionnez votre certificat (.pem)</label>
+                        <div id="drop-zone" class="drop-zone">
+                            <span class="drop-zone__prompt">Glissez votre certificat .pem ici ou cliquez pour
+                                choisir</span>
+                            <input type="file" id="cert-file" class="drop-zone__input" accept=".pem">
+                        </div>
+                        <div id="file-info" class="file-info" style="display:none;">
+                            <span id="file-name">Aucun fichier</span>
+                            <button class="remove-file" onclick="removeCertFile()">×</button>
+                        </div>
+                    </div>
+                    <button class="login-btn" id="login-cert-btn" onclick="loginWithCertificate()" disabled>Se connecter
+                        avec certificat</button>
+                </div>
+
 
                 <div class="user-info" id="user-info" style="display: none;">
                     <div class="success-icon">✓</div>
