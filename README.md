@@ -406,6 +406,28 @@ WINDY_POLL_INTERVAL=60
 - **Latence** : <2s par poll
 - **Rate limit** : Respecte limites API Windy
 
+## 📊 Observabilité
+
+Le projet inclut une stack complète d'observabilité avec **Loki + Promtail + Grafana** :
+
+- **Loki** (Port 3100) : Base de données de logs
+- **Promtail** : Collecteur de logs
+- **Grafana** (Port 3000) : Visualisation et dashboards
+  - Login: `admin` / `admin`
+  - Dashboard: "Temperature API - Logs Dashboard"
+
+**Logging structuré** au format JSON avec traçabilité (trace_id) pour tous les services.
+
+📖 **Documentation complète** : [observability/README.md](observability/README.md)
+
+```bash
+# Accéder aux logs dans Grafana
+open http://localhost:3000
+
+# Tester le système de logging
+python test_logging.py
+```
+
 ## 🧪 Tests
 
 Voir [TEST_GUIDE.md](TEST_GUIDE.md) pour guide de test complet.
