@@ -12,11 +12,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, HTTPException, Query, Security, Request
 from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Optional
 import jwt
 from datetime import datetime, timedelta, timezone
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from services.spark_service import get_query_service
 from services.windy_service import get_windy_service
 from auth import HybridAuthManager, create_hybrid_auth_dependency
@@ -94,6 +98,26 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+)
+
+# Configuration Rate Limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Configuration CORS pour le frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:5500",  # Live Server
+        "file://"  # Fichiers locaux
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Endpoints bêta (NOT WORKING) - masqués du Swagger sauf pour ADMIN
@@ -188,7 +212,9 @@ SwaggerUIBundle({{
 # ============================================================================
 
 @app.post("/auth/token")
-async def get_token(
+@limiter.limit("5/minute")
+async def generate_token(
+    request: Request,
     api_key: Optional[str] = Query(None, description="Clé API (peut aussi être passée en header X-API-Key)"),
     header_key: Optional[str] = Security(APIKeyHeader(name="X-API-Key", auto_error=False))
 ):
@@ -234,7 +260,9 @@ async def get_token(
 
 
 @app.post("/auth/certificate")
+@limiter.limit("10/minute")
 async def validate_certificate(
+    request: Request,
     cert_pem: str = Query(..., description="Certificat client au format PEM")
 ):
     """
@@ -285,7 +313,8 @@ async def validate_certificate(
 
 
 @app.get("/auth/test")
-async def test_auth(api_info: dict = Security(require_auth)):
+@limiter.limit("60/minute")
+async def test_auth(request: Request, api_info: dict = Security(require_auth)):
     """
     Endpoint de test simple pour vérifier l'authentification.
     Ne nécessite pas Spark - retourne juste les infos d'authentification.
@@ -307,7 +336,9 @@ async def test_auth(api_info: dict = Security(require_auth)):
 # ============================================================================
 
 @app.get("/data")
+@limiter.limit("100/minute")
 async def get_data(
+    request: Request,
     city: Optional[str] = Query(None, description="Filtrer par ville"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
     api_info: dict = Security(require_auth)
@@ -380,7 +411,8 @@ async def get_anomalies(
 
 
 @app.get("/cities")
-async def get_cities(api_info: dict = Security(require_auth)):
+@limiter.limit("100/minute")
+async def get_cities(request: Request, api_info: dict = Security(require_auth)):
     """
     Retourne la liste des villes disponibles.
     🔐 Zone BASIC
@@ -395,7 +427,8 @@ async def get_cities(api_info: dict = Security(require_auth)):
 
 
 @app.get("/years")
-async def get_years(api_info: dict = Security(require_auth)):
+@limiter.limit("100/minute")
+async def get_years(request: Request, api_info: dict = Security(require_auth)):
     """
     Retourne la liste des années disponibles.
     🔐 Zone BASIC
@@ -410,7 +443,8 @@ async def get_years(api_info: dict = Security(require_auth)):
 
 
 @app.get("/countries")
-async def get_countries(api_info: dict = Security(require_auth)):
+@limiter.limit("100/minute")
+async def get_countries(request: Request, api_info: dict = Security(require_auth)):
     """
     Retourne la liste des pays disponibles.
     🔐 Zone BASIC

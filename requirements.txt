@@ -6,4 +6,6 @@ requests
 python-dotenv
 fastapi
 uvicorn[standard]
-PyJWTcryptography
+PyJWT
+cryptography
+slowapi
