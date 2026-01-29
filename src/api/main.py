@@ -284,6 +284,24 @@ async def validate_certificate(
     }
 
 
+@app.get("/auth/test")
+async def test_auth(api_info: dict = Security(require_auth)):
+    """
+    Endpoint de test simple pour vérifier l'authentification.
+    Ne nécessite pas Spark - retourne juste les infos d'authentification.
+    🔐 Zone BASIC
+    """
+    require_role(api_info, "BASIC")
+    return {
+        "status": "authenticated",
+        "auth_method": api_info.get("auth_method"),
+        "name": api_info.get("name"),
+        "role": api_info.get("role"),
+        "max_results": api_info.get("max_results"),
+        "message": "Authentification réussie !"
+    }
+
+
 # ============================================================================
 # ENDPOINTS DE REQUÊTAGE
 # ============================================================================
