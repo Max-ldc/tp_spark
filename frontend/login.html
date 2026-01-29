@@ -1,20 +1,23 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CESI Temperature API - Connexion</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="https://cdn.jsdelivr.net/npm/keycloak-js@23/dist/keycloak.min.js"></script>
+    <!-- Keycloak supprimé -->
 </head>
+
 <body>
     <div class="container">
         <div class="login-card">
             <div class="logo-section">
                 <div class="logo">
                     <svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <circle cx="30" cy="30" r="28" stroke="url(#gradient)" stroke-width="4"/>
-                        <path d="M30 15 L30 30 L42 30" stroke="url(#gradient)" stroke-width="3" stroke-linecap="round"/>
+                        <circle cx="30" cy="30" r="28" stroke="url(#gradient)" stroke-width="4" />
+                        <path d="M30 15 L30 30 L42 30" stroke="url(#gradient)" stroke-width="3"
+                            stroke-linecap="round" />
                         <defs>
                             <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
                                 <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
@@ -24,49 +27,26 @@
                     </svg>
                 </div>
                 <h1>CESI Temperature API</h1>
-                <p class="subtitle">Système d'authentification sécurisé</p>
+                <p class="subtitle">Connexion sécurisée par Clé API</p>
             </div>
 
             <div id="auth-section">
-                <div class="loading" id="loading">
-                    <div class="spinner"></div>
-                    <p>Initialisation de l'authentification...</p>
-                </div>
-
-                <div class="auth-methods" id="auth-methods" style="display: none;">
-                    <h2>Choisissez votre méthode de connexion</h2>
-                    
-                    <button class="auth-button keycloak-btn" onclick="loginWithKeycloak()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-                            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-                            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-                        </svg>
-                        <div>
-                            <div class="btn-title">Keycloak SSO</div>
-                            <div class="btn-subtitle">Authentification d'entreprise</div>
-                        </div>
-                    </button>
-
-                    <div class="divider">
-                        <span>ou</span>
+                <div class="api-key-form" id="api-key-form" style="display: block;">
+                    <div class="form-group">
+                        <label for="api-key-input">Entrez votre Clé API</label>
+                        <input type="text" id="api-key-input" placeholder="ex: basic-key-001" class="api-key-input">
                     </div>
 
-                    <button class="auth-button api-key-btn" onclick="showApiKeyForm()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                            <path d="M15 7C15 8.65685 13.6569 10 12 10C10.3431 10 9 8.65685 9 7C9 5.34315 10.3431 4 12 4C13.6569 4 15 5.34315 15 7Z" stroke="currentColor" stroke-width="2"/>
-                            <path d="M12 10V20M12 20L9 17M12 20L15 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                        <div>
-                            <div class="btn-title">Clé API</div>
-                            <div class="btn-subtitle">Pour développeurs</div>
-                        </div>
-                    </button>
+                    <button class="submit-btn" onclick="loginWithApiKey()">Se connecter</button>
 
-                    <div class="api-key-form" id="api-key-form" style="display: none;">
-                        <input type="text" id="api-key-input" placeholder="Entrez votre clé API" class="api-key-input">
-                        <button class="submit-btn" onclick="loginWithApiKey()">Se connecter</button>
-                        <button class="cancel-btn" onclick="hideApiKeyForm()">Annuler</button>
+                    <div class="help-text">
+                        <p>Clés de démo disponibles :</p>
+                        <ul>
+                            <li><strong>BASIC:</strong> <code>basic-key-001</code></li>
+                            <li><strong>ANALYST:</strong> <code>analyst-key-002</code></li>
+                            <li><strong>WINDY:</strong> <code>windy-key-003</code></li>
+                            <li><strong>ADMIN:</strong> <code>admin-key-004</code></li>
+                        </ul>
                     </div>
                 </div>
 
@@ -76,24 +56,27 @@
                     <div class="user-details">
                         <p><strong>Utilisateur :</strong> <span id="username"></span></p>
                         <p><strong>Rôle :</strong> <span id="user-role" class="role-badge"></span></p>
-                        <p><strong>Méthode :</strong> <span id="auth-method"></span></p>
                     </div>
                     <button class="dashboard-btn" onclick="goToDashboard()">
                         Accéder au Dashboard
                         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M10 3L9 4L15 10L9 16L10 17L17 10L10 3Z"/>
+                            <path d="M10 3L9 4L15 10L9 16L10 17L17 10L10 3Z" />
                         </svg>
                     </button>
+                    <div style="margin-top: 15px;">
+                        <button class="cancel-btn" onclick="logout()" style="width: 100%;">Déconnexion</button>
+                    </div>
                 </div>
             </div>
 
             <div class="footer">
-                <p>🔐 Authentification hybride : Keycloak SSO, JWT, API Keys</p>
+                <p>🔐 Accès sécurisé RBAC (Role-Based Access Control)</p>
                 <p class="small">CESI M2 - Données Distribuées</p>
             </div>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
+
 </html>

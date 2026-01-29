@@ -105,17 +105,11 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configuration CORS pour le frontend
+# Configuration CORS pour le frontend (accepter toutes les origines en dev)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:5500",  # Live Server
-        "file://"  # Fichiers locaux
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Accepter toutes les origines
+    allow_credentials=False,  # Doit être False avec allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )

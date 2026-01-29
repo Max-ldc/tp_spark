@@ -126,30 +126,78 @@
         <div class="api-section">
             <h2>🧪 Tester l'API</h2>
             <p style="color: var(--text-light); margin-bottom: 20px;">
-                Cliquez sur un endpoint pour tester l'authentification
+                Les endpoints ci-dessous sont filtrés selon votre rôle.
             </p>
 
-            <button class="endpoint-btn" onclick="testEndpoint('/auth/test')">
-                GET /auth/test - Vérifier l'authentification
-            </button>
+            <!-- BASIC endpoints (Visible pour TOUS) -->
+            <div id="section-basic" class="role-section">
+                <h3 style="color: #48bb78; border-left: 4px solid #48bb78; padding-left: 10px; margin: 20px 0;">🟢 BASIC
+                    - Socle Commun</h3>
+                <button class="endpoint-btn" onclick="testEndpoint('/health')">GET /health - Statut API</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/cities')">GET /cities - Villes</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/countries')">GET /countries - Pays</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/years')">GET /years - Années</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/data?limit=5')">GET /data - Données (limit
+                    5)</button>
+                <!-- Exemples paramétrés -->
+                <button class="endpoint-btn" onclick="testEndpoint('/data/year/2023')">GET /data/year/2023</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/data/country/France')">GET
+                    /data/country/France</button>
+            </div>
 
-            <button class="endpoint-btn" onclick="testEndpoint('/cities')">
-                GET /cities - Liste des villes
-            </button>
+            <!-- ANALYST endpoints (Visible pour ANALYST et ADMIN) -->
+            <div id="section-analyst" class="role-section" style="display:none;">
+                <h3 style="color: #4299e1; border-left: 4px solid #4299e1; padding-left: 10px; margin: 20px 0;">🔵
+                    ANALYST - Analyse Historique</h3>
+                <button class="endpoint-btn" onclick="testEndpoint('/anomalies')">GET /anomalies - Anomalies
+                    Tech</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/search?q=Par')">GET /search?q=Par</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/recent/latest')">GET /recent/latest - Dernières
+                    données</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/recent/years?num_years=5')">GET /recent/years - 5
+                    dernières années</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/recent/anomalies')">GET /recent/anomalies -
+                    Anomalies récentes</button>
+            </div>
 
-            <button class="endpoint-btn" onclick="testEndpoint('/countries')">
-                GET /countries - Liste des pays
-            </button>
+            <!-- WINDY endpoints (Visible pour WINDY et ADMIN) -->
+            <div id="section-windy" class="role-section" style="display:none;">
+                <h3 style="color: #ed8936; border-left: 4px solid #ed8936; padding-left: 10px; margin: 20px 0;">🟠 WINDY
+                    - Temps Réel</h3>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/current')">GET /windy/current - Météo
+                    Actuelle</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/locations')">GET /windy/locations -
+                    Localisations surveillées</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/anomalies')">GET /windy/anomalies - Anomalies
+                    temps réel</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/hemispheres')">GET /windy/hemispheres -
+                    Compar. Hémisphères</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/latitude-bands')">GET /windy/latitude-bands -
+                    Bandes Latitude</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/windy/streaming/history?limit=10')">GET
+                    /windy/streaming/history - Historique Streaming</button>
+            </div>
 
-            <button class="endpoint-btn" onclick="testEndpoint('/years')">
-                GET /years - Liste des années
-            </button>
+            <!-- ADMIN endpoints (Visible pour ADMIN seulement) -->
+            <div id="section-admin" class="role-section" style="display:none;">
+                <h3 style="color: #f56565; border-left: 4px solid #f56565; padding-left: 10px; margin: 20px 0;">🔴 ADMIN
+                    - Maintenance & Avancé</h3>
+                <button class="endpoint-btn" onclick="testEndpoint('/auth/test')">GET /auth/test - Debug Auth</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/stats')">GET /stats - Statistiques
+                    Globales</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/warming/top')">GET /warming/top - Top
+                    Réchauffement</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/hemispheres')">GET /hemispheres - Analyse
+                    Hémisphères</button>
+                <button class="endpoint-btn" onclick="testEndpoint('/trends/Paris')">GET /trends/Paris
+                    (Exemple)</button>
+            </div>
 
             <div id="response-container"></div>
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
     <script>
         // Vérifier l'authentification au chargement
         window.addEventListener('DOMContentLoaded', () => {
