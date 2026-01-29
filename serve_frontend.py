@@ -29,10 +29,12 @@ class MyHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     
-    with socketserver.TCPServer(("", PORT), MyHTTPRequestHandler) as httpd:
-        print(f"🌐 Serveur frontend démarré sur http://localhost:{PORT}")
+    # Écouter sur 0.0.0.0 pour être accessible depuis l'extérieur
+    with socketserver.TCPServer(("0.0.0.0", PORT), MyHTTPRequestHandler) as httpd:
+        print(f"🌐 Serveur frontend démarré sur http://0.0.0.0:{PORT}")
         print(f"📁 Répertoire: {os.path.abspath(DIRECTORY)}")
-        print(f"\n✨ Ouvrez http://localhost:{PORT}/login.html dans votre navigateur")
+        print(f"\n✨ Accès local: http://localhost:{PORT}/login.html")
+        print(f"✨ Accès externe: http://[VOTRE_IP]:{PORT}/login.html")
         print(f"\nAppuyez sur Ctrl+C pour arrêter le serveur\n")
         try:
             httpd.serve_forever()

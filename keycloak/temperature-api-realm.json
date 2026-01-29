@@ -16,13 +16,19 @@
       "redirectUris": [
         "http://localhost:*",
         "http://127.0.0.1:*",
-        "file://*"
+        "http://10.*:*",
+        "http://192.168.*:*",
+        "http://172.*:*",
+        "*"
       ],
       "webOrigins": [
         "http://localhost:*",
         "http://127.0.0.1:*",
-        "file://*",
-        "+"
+        "http://10.*:*",
+        "http://192.168.*:*",
+        "http://172.*:*",
+        "+",
+        "*"
       ],
       "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
@@ -69,7 +75,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["BASIC"]
+      "realmRoles": [
+        "BASIC"
+      ]
     },
     {
       "username": "analyst-user",
@@ -85,7 +93,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["ANALYST"]
+      "realmRoles": [
+        "ANALYST"
+      ]
     },
     {
       "username": "windy-user",
@@ -101,7 +111,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["WINDY"]
+      "realmRoles": [
+        "WINDY"
+      ]
     },
     {
       "username": "admin",
@@ -117,7 +129,9 @@
           "temporary": false
         }
       ],
-      "realmRoles": ["ADMIN"]
+      "realmRoles": [
+        "ADMIN"
+      ]
     }
   ]
 }
