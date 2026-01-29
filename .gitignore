@@ -7,3 +7,35 @@ data/
 dist/
 build/
 .env
+
+# 🔐 Certificats et clés privées (SÉCURITÉ)
+certs/
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+
+# Configuration sensible
+.env.local
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+Thumbs.db
+
+# Spark
+.spark-staging/
+.spark_local_dir/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/

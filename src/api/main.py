@@ -19,10 +19,11 @@ import jwt
 from datetime import datetime, timedelta, timezone
 from services.spark_service import get_query_service
 from services.windy_service import get_windy_service
+from auth import HybridAuthManager, create_hybrid_auth_dependency
 
 
 # ============================================================================
-# CONFIGURATION API KEYS
+# CONFIGURATION AUTHENTIFICATION HYBRIDE
 # ============================================================================
 
 # Rôles disponibles et leur hiérarchie d'accès
@@ -50,43 +51,20 @@ JWT_SECRET = "spark-api-secret-key-change-in-production"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 1
 
-# Header pour l'API Key
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+# Configuration Certificats (optionnel)
+CERTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "certs")
+CA_CERT_PATH = os.path.join(CERTS_DIR, "ca", "ca-cert.pem") if os.path.exists(os.path.join(CERTS_DIR, "ca")) else None
 
+# Initialiser le gestionnaire d'authentification hybride
+auth_manager = HybridAuthManager(
+    jwt_secret=JWT_SECRET,
+    jwt_algorithm=JWT_ALGORITHM,
+    ca_cert_path=CA_CERT_PATH,
+    valid_api_keys=VALID_API_KEYS
+)
 
-async def require_api_key(request: Request, api_key: Optional[str] = Security(api_key_header)) -> dict:
-    """
-    Authentification par JWT (Bearer token) ou API Key statique.
-    Priority : Bearer token > X-API-Key header.
-    """
-    # 1. Vérifier le Bearer token
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-            return {
-                "name": payload["name"],
-                "role": payload["role"],
-                "max_results": payload["max_results"],
-            }
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="Token expiré")
-        except jwt.InvalidTokenError:
-            raise HTTPException(status_code=401, detail="Token invalide")
-
-    # 2. Sinon, vérifier l'API Key statique
-    if api_key is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Authentification requise. Utilisez 'Authorization: Bearer <token>' ou 'X-API-Key'"
-        )
-    if api_key not in VALID_API_KEYS:
-        raise HTTPException(
-            status_code=403,
-            detail="Clé API invalide"
-        )
-    return {"key": api_key, **VALID_API_KEYS[api_key]}
+# Créer la dépendance Security pour l'authentification hybride
+require_auth = create_hybrid_auth_dependency(auth_manager)
 
 
 def require_role(api_info: dict, required_zone: str):
@@ -212,7 +190,7 @@ SwaggerUIBundle({{
 @app.post("/auth/token")
 async def get_token(
     api_key: Optional[str] = Query(None, description="Clé API (peut aussi être passée en header X-API-Key)"),
-    header_key: Optional[str] = Security(api_key_header)
+    header_key: Optional[str] = Security(APIKeyHeader(name="X-API-Key", auto_error=False))
 ):
     """
     Génère un JWT à partir d'une clé API statique valide.
@@ -222,6 +200,11 @@ async def get_token(
     - Dans le header X-API-Key
     
     Retourne un token JWT valide pour 1 heure.
+    
+    🔐 Authentification hybride :
+    - Certificat X.509 (optionnel)
+    - JWT Bearer token
+    - API Keys statiques
     """
     # Prioriser le paramètre query, sinon utiliser le header
     resolved_key = api_key or header_key
@@ -238,21 +221,66 @@ async def get_token(
         )
     
     user_info = VALID_API_KEYS[resolved_key]
-    expiration = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     
-    payload = {
-        "name": user_info["name"],
-        "role": user_info["role"],
-        "max_results": user_info["max_results"],
-        "exp": expiration
-    }
+    # Utiliser le gestionnaire d'authentification hybride pour générer le JWT
+    token_response = auth_manager.generate_jwt_token(
+        name=user_info["name"],
+        role=user_info["role"],
+        max_results=user_info["max_results"],
+        expiration_hours=JWT_EXPIRATION_HOURS
+    )
     
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return token_response
+
+
+@app.post("/auth/certificate")
+async def validate_certificate(
+    cert_pem: str = Query(..., description="Certificat client au format PEM")
+):
+    """
+    Valide un certificat X.509 client et extrait les informations d'authentification.
+    
+    Optionnel : Génère un JWT si le certificat est valide.
+    
+    📋 Usage:
+    ```bash
+    # 1. Valider le certificat
+    curl -X POST "http://localhost:8000/auth/certificate?cert_pem=$(cat client-cert.pem)"
+    
+    # 2. Utiliser le JWT reçu
+    curl -H "Authorization: Bearer <access_token>" http://localhost:8000/health
+    ```
+    """
+    is_valid, cert_info, error_msg = auth_manager.cert_validator.validate_certificate_pem(cert_pem)
+    
+    if not is_valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Certificat invalide: {error_msg}"
+        )
+    
+    # Extraire les infos et générer un JWT
+    cn = cert_info.get("cn", "certificate-client")
+    role = cert_info.get("role", "BASIC")
+    max_results = auth_manager._get_max_results_for_role(role)
+    
+    token_response = auth_manager.generate_jwt_token(
+        name=cn,
+        role=role,
+        max_results=max_results,
+        expiration_hours=JWT_EXPIRATION_HOURS
+    )
     
     return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": JWT_EXPIRATION_HOURS * 3600
+        **token_response,
+        "certificate_info": {
+            "cn": cn,
+            "role": role,
+            "valid_from": cert_info["valid_from"].isoformat(),
+            "valid_until": cert_info["valid_until"].isoformat(),
+            "subject": cert_info["subject"],
+            "issuer": cert_info["issuer"],
+        }
     }
 
 
@@ -264,7 +292,7 @@ async def get_token(
 async def get_data(
     city: Optional[str] = Query(None, description="Filtrer par ville"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les données température par année/ville.
@@ -287,7 +315,7 @@ async def get_data(
 @app.get("/stats")
 async def get_stats(
     city: Optional[str] = Query(None, description="Filtrer par ville"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Calcule les statistiques agrégées par ville.
@@ -313,7 +341,7 @@ async def get_stats(
 async def get_anomalies(
     anomaly_type: Optional[str] = Query(None, description="Type: 'Exceptionally Hot' ou 'Exceptionally Cold'"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les anomalies de température (années exceptionnellement chaudes ou froides).
@@ -334,7 +362,7 @@ async def get_anomalies(
 
 
 @app.get("/cities")
-async def get_cities(api_info: dict = Security(require_api_key)):
+async def get_cities(api_info: dict = Security(require_auth)):
     """
     Retourne la liste des villes disponibles.
     🔐 Zone BASIC
@@ -349,7 +377,7 @@ async def get_cities(api_info: dict = Security(require_api_key)):
 
 
 @app.get("/years")
-async def get_years(api_info: dict = Security(require_api_key)):
+async def get_years(api_info: dict = Security(require_auth)):
     """
     Retourne la liste des années disponibles.
     🔐 Zone BASIC
@@ -364,7 +392,7 @@ async def get_years(api_info: dict = Security(require_api_key)):
 
 
 @app.get("/countries")
-async def get_countries(api_info: dict = Security(require_api_key)):
+async def get_countries(api_info: dict = Security(require_auth)):
     """
     Retourne la liste des pays disponibles.
     🔐 Zone BASIC
@@ -382,7 +410,7 @@ async def get_countries(api_info: dict = Security(require_api_key)):
 async def get_data_by_year(
     year: int,
     limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les données pour une année spécifique.
@@ -402,7 +430,7 @@ async def get_data_by_year(
 async def get_data_by_country(
     country: str,
     limit: int = Query(1000, ge=1, le=5000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les données pour un pays spécifique.
@@ -421,7 +449,7 @@ async def get_data_by_country(
 @app.get("/warming/top")
 async def get_warming_top(
     limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Retourne les villes qui se réchauffent le plus rapidement.
@@ -443,7 +471,7 @@ async def get_warming_top(
 @app.get("/warming/cooling")
 async def get_warming_cooling(
     limit: int = Query(20, ge=1, le=100, description="Nombre de villes à retourner"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Retourne les villes qui refroidissent (taux de réchauffement négatif).
@@ -460,7 +488,7 @@ async def get_warming_cooling(
 
 
 @app.get("/hemispheres")
-async def get_hemispheres_comparison(api_info: dict = Security(require_api_key)):
+async def get_hemispheres_comparison(api_info: dict = Security(require_auth)):
     """
     Compare les statistiques de température entre les hémisphères Nord et Sud.
     🔐 Zone ADMIN
@@ -481,7 +509,7 @@ async def get_hemispheres_comparison(api_info: dict = Security(require_api_key))
 
 
 @app.get("/latitude-bands")
-async def get_latitude_bands(api_info: dict = Security(require_api_key)):
+async def get_latitude_bands(api_info: dict = Security(require_auth)):
     """
     Statistiques par bande de latitude.
     🔐 Requiert une API Key (header X-API-Key)
@@ -507,7 +535,7 @@ async def get_latitude_bands(api_info: dict = Security(require_api_key)):
 async def search_cities(
     q: str = Query(..., min_length=2, description="Terme de recherche (min 2 caractères)"),
     limit: int = Query(50, ge=1, le=200, description="Nombre max de résultats"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Recherche de villes par nom partiel.
@@ -532,7 +560,7 @@ async def search_cities(
 @app.get("/recent/latest")
 async def get_latest_data(
     limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les données de l'année la plus récente.
@@ -557,7 +585,7 @@ async def get_latest_data(
 async def get_recent_years(
     num_years: int = Query(5, ge=1, le=20, description="Nombre d'années récentes"),
     limit: int = Query(500, ge=1, le=2000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les données des N dernières années.
@@ -577,7 +605,7 @@ async def get_recent_years(
 
 
 @app.get("/recent/summary")
-async def get_recent_summary(api_info: dict = Security(require_api_key)):
+async def get_recent_summary(api_info: dict = Security(require_auth)):
     """
     Résumé des 10 dernières années.
     🔐 Zone ADMIN (bêta)
@@ -604,7 +632,7 @@ async def get_recent_summary(api_info: dict = Security(require_api_key)):
 async def get_recent_anomalies(
     num_years: int = Query(5, ge=1, le=20, description="Nombre d'années récentes"),
     limit: int = Query(50, ge=1, le=200, description="Nombre max d'anomalies"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les anomalies des N dernières années.
@@ -626,7 +654,7 @@ async def get_recent_anomalies(
 
 
 @app.get("/trends/{city}")
-async def get_city_trends(city: str, api_info: dict = Security(require_api_key)):
+async def get_city_trends(city: str, api_info: dict = Security(require_auth)):
     """
     Compare les tendances récentes vs historiques pour une ville.
     🔐 Zone ADMIN
@@ -643,7 +671,7 @@ async def get_city_trends(city: str, api_info: dict = Security(require_api_key))
 
 
 @app.get("/health")
-async def health_check(api_info: dict = Security(require_api_key)):
+async def health_check(api_info: dict = Security(require_auth)):
     """
     Vérifie que l'API et Spark fonctionnent.
     🔐 Zone BASIC
@@ -670,7 +698,7 @@ async def health_check(api_info: dict = Security(require_api_key)):
 @app.get("/windy/current")
 async def get_windy_current(
     location: Optional[str] = Query(None, description="Filtrer par nom de localisation"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Récupère les conditions météo ACTUELLES depuis l'API Windy.
@@ -698,7 +726,7 @@ async def get_windy_current(
 
 
 @app.get("/windy/anomalies")
-async def get_windy_anomalies(api_info: dict = Security(require_api_key)):
+async def get_windy_anomalies(api_info: dict = Security(require_auth)):
     """
     Récupère les ANOMALIES météo actuelles.
     🔐 Requiert une API Key (header X-API-Key)
@@ -721,7 +749,7 @@ async def get_windy_anomalies(api_info: dict = Security(require_api_key)):
 
 
 @app.get("/windy/hemispheres")
-async def get_windy_hemispheres(api_info: dict = Security(require_api_key)):
+async def get_windy_hemispheres(api_info: dict = Security(require_auth)):
     """
     Statistiques météo ACTUELLES par hémisphère (Nord vs Sud).
     🔐 Zone WINDY
@@ -735,7 +763,7 @@ async def get_windy_hemispheres(api_info: dict = Security(require_api_key)):
 
 
 @app.get("/windy/latitude-bands")
-async def get_windy_latitude_bands(api_info: dict = Security(require_api_key)):
+async def get_windy_latitude_bands(api_info: dict = Security(require_auth)):
     """
     Statistiques météo ACTUELLES par bande de latitude.
     🔐 Zone WINDY
@@ -755,7 +783,7 @@ async def get_windy_latitude_bands(api_info: dict = Security(require_api_key)):
 
 
 @app.get("/windy/locations")
-async def get_windy_locations(api_info: dict = Security(require_api_key)):
+async def get_windy_locations(api_info: dict = Security(require_auth)):
     """
     Retourne la liste des localisations surveillées par Windy.
     🔐 Zone WINDY
@@ -778,7 +806,7 @@ async def get_windy_locations(api_info: dict = Security(require_api_key)):
 async def get_windy_streaming_history(
     location: Optional[str] = Query(None, description="Filtrer par localisation"),
     limit: int = Query(100, ge=1, le=1000, description="Nombre max d'enregistrements"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Historique des mesures streaming (données collectées en continu).
@@ -805,7 +833,7 @@ async def get_windy_streaming_history(
 async def get_windy_streaming_trends(
     location: str,
     hours: int = Query(24, ge=1, le=168, description="Nombre d'heures à analyser"),
-    api_info: dict = Security(require_api_key)
+    api_info: dict = Security(require_auth)
 ):
     """
     Analyse les tendances météo sur les N dernières heures.
