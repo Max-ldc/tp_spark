@@ -1,19 +1,3 @@
-// Configuration Keycloak - URL dynamique
-const getKeycloakUrl = () => {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return 'http://localhost:8080/';
-    }
-    return `http://${window.location.hostname}:8080/`;
-};
-
-const keycloakConfig = {
-    url: getKeycloakUrl(),
-    realm: 'temperature-api',
-    clientId: 'temperature-frontend'
-};
-
-console.log('Keycloak URL:', keycloakConfig.url);
-
 // Configuration API - détection automatique
 const getApiUrl = () => {
     // Si on accède via localhost, utiliser localhost
@@ -27,86 +11,26 @@ const getApiUrl = () => {
 const API_URL = getApiUrl();
 console.log('API URL:', API_URL);
 
-let keycloak = null;
-let currentToken = null;
 let currentUser = null;
 
 // Initialisation au chargement de la page
 document.addEventListener('DOMContentLoaded', () => {
-    // Afficher les méthodes d'auth immédiatement (pas d'attente Keycloak)
-    showAuthMethods();
+    // Vérification de l'authentification si on est sur le dashboard
+    if (window.location.href.includes('dashboard.html')) {
+        checkAuth();
+    } else {
+        // Rediriger vers le dashboard si déjà connecté
+        const user = sessionStorage.getItem('user');
+        if (user) {
+            window.location.href = 'dashboard.html';
+        }
+    }
 });
-
-// Initialiser Keycloak
-async function initKeycloak() {
-    try {
-        // Timeout de 5 secondes pour l'initialisation Keycloak
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout Keycloak')), 5000)
-        );
-
-        const initPromise = (async () => {
-            keycloak = new Keycloak(keycloakConfig);
-
-            const authenticated = await keycloak.init({
-                onLoad: 'check-sso',
-                silentCheckSsoRedirectUri: window.location.origin + '/silent-check-sso.html',
-                checkLoginIframe: false
-            });
-
-            if (authenticated) {
-                await handleAuthenticated();
-            } else {
-                showAuthMethods();
-            }
-        })();
-
-        await Promise.race([initPromise, timeoutPromise]);
-
-    } catch (error) {
-        console.error('Erreur initialisation Keycloak:', error);
-        // Si Keycloak n'est pas disponible, afficher quand même les méthodes d'auth
-        showAuthMethods();
-    }
-}
-
-// Afficher les méthodes d'authentification
-function showAuthMethods() {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('auth-methods').style.display = 'block';
-}
-
-// Connexion avec Keycloak
-async function loginWithKeycloak() {
-    if (!keycloak) {
-        alert('Keycloak n\'est pas disponible. Veuillez vérifier que le serveur Keycloak est démarré sur http://localhost:8080');
-        return;
-    }
-
-    try {
-        await keycloak.login({
-            redirectUri: window.location.origin + '/frontend/login.html'
-        });
-    } catch (error) {
-        console.error('Erreur connexion Keycloak:', error);
-        alert('Erreur lors de la connexion avec Keycloak');
-    }
-}
-
-// Afficher le formulaire API Key
-function showApiKeyForm() {
-    document.getElementById('api-key-form').style.display = 'block';
-}
-
-// Masquer le formulaire API Key
-function hideApiKeyForm() {
-    document.getElementById('api-key-form').style.display = 'none';
-    document.getElementById('api-key-input').value = '';
-}
 
 // Connexion avec API Key
 async function loginWithApiKey() {
-    const apiKey = document.getElementById('api-key-input').value.trim();
+    const apiKeyInput = document.getElementById('api-key-input');
+    const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
 
     if (!apiKey) {
         alert('Veuillez entrer une clé API');
@@ -130,7 +54,6 @@ async function loginWithApiKey() {
                 authMethod: 'API Key',
                 maxResults: data.max_results
             };
-            currentToken = apiKey;
 
             // Sauvegarder dans sessionStorage
             sessionStorage.setItem('authMethod', 'api-key');
@@ -144,65 +67,81 @@ async function loginWithApiKey() {
         }
     } catch (error) {
         console.error('Erreur connexion API Key:', error);
-        alert('Erreur lors de la connexion.\n\nDétails: ' + error.message + '\n\nAssurez-vous que:\n1. L\'API est démarrée sur http://127.0.0.1:8000\n2. Vous ouvrez cette page via un serveur HTTP (pas file://)\n\nUtilisez: python -m http.server 5500 dans le dossier frontend');
+        alert('Erreur lors de la connexion.\n\nDétails: ' + error.message + '\n\nURL API: ' + API_URL + '\n\nVérifiez que l\'API est accessible depuis votre navigateur.');
     }
 }
 
-// Gérer l'authentification réussie avec Keycloak
-async function handleAuthenticated() {
-    try {
-        await keycloak.loadUserProfile();
-
-        // Extraire les rôles
-        const roles = keycloak.tokenParsed.realm_access?.roles || [];
-        const apiRole = roles.find(r => ['BASIC', 'ANALYST', 'WINDY', 'ADMIN'].includes(r.toUpperCase())) || 'BASIC';
-
-        currentUser = {
-            name: keycloak.tokenParsed.preferred_username || keycloak.tokenParsed.name || 'Utilisateur',
-            role: apiRole.toUpperCase(),
-            authMethod: 'Keycloak SSO',
-            email: keycloak.tokenParsed.email
-        };
-        currentToken = keycloak.token;
-
-        // Sauvegarder dans sessionStorage
-        sessionStorage.setItem('authMethod', 'keycloak');
-        sessionStorage.setItem('token', keycloak.token);
-        sessionStorage.setItem('refreshToken', keycloak.refreshToken);
-        sessionStorage.setItem('user', JSON.stringify(currentUser));
-
-        showUserInfo();
-
-        // Rafraîchir le token automatiquement
-        setInterval(async () => {
-            try {
-                const refreshed = await keycloak.updateToken(30);
-                if (refreshed) {
-                    currentToken = keycloak.token;
-                    sessionStorage.setItem('token', keycloak.token);
-                }
-            } catch (error) {
-                console.error('Erreur rafraîchissement token:', error);
-            }
-        }, 60000); // Toutes les minutes
-
-    } catch (error) {
-        console.error('Erreur chargement profil:', error);
-        showAuthMethods();
-    }
-}
-
-// Afficher les informations utilisateur
+// Afficher les informations utilisateur sur la page de login après succès
 function showUserInfo() {
-    document.getElementById('auth-methods').style.display = 'none';
-    document.getElementById('loading').style.display = 'none';
-
+    const apiKeyForm = document.getElementById('api-key-form');
     const userInfoDiv = document.getElementById('user-info');
-    document.getElementById('username').textContent = currentUser.name;
-    document.getElementById('user-role').textContent = currentUser.role;
-    document.getElementById('auth-method').textContent = currentUser.authMethod;
 
-    userInfoDiv.style.display = 'block';
+    if (apiKeyForm) apiKeyForm.style.display = 'none';
+
+    if (userInfoDiv) {
+        document.getElementById('username').textContent = currentUser.name;
+        document.getElementById('user-role').textContent = currentUser.role;
+        // document.getElementById('auth-method').textContent = currentUser.authMethod; // Élément supprimé du HTML
+        userInfoDiv.style.display = 'block';
+    }
+}
+
+// Vérifier l'authentification sur le dashboard
+function checkAuth() {
+    const user = sessionStorage.getItem('user');
+    if (!user) {
+        window.location.href = 'login.html';
+        return;
+    }
+
+    const userData = JSON.parse(user);
+    currentUser = userData;
+
+    // Mise à jour de l'UI du dashboard
+    const nameEl = document.getElementById('dashboard-username');
+    const roleEl = document.getElementById('dashboard-role');
+    const methodEl = document.getElementById('dashboard-method');
+    const avatarEl = document.getElementById('avatar');
+
+    if (nameEl) nameEl.textContent = userData.name;
+    if (roleEl) roleEl.textContent = userData.role;
+    if (methodEl) methodEl.textContent = '• ' + userData.authMethod;
+    if (avatarEl) avatarEl.textContent = userData.name.charAt(0).toUpperCase();
+
+    // Gestion de l'affichage RBAC (Role-Based Access Control)
+    updateDashboardUI(userData.role);
+}
+
+// Mettre à jour l'interface selon le rôle
+function updateDashboardUI(role) {
+    const sections = {
+        basic: document.getElementById('section-basic'),
+        analyst: document.getElementById('section-analyst'),
+        windy: document.getElementById('section-windy'),
+        admin: document.getElementById('section-admin')
+    };
+
+    // Masquer tout par défaut (sauf basic qui est toujours là)
+    if (sections.analyst) sections.analyst.style.display = 'none';
+    if (sections.windy) sections.windy.style.display = 'none';
+    if (sections.admin) sections.admin.style.display = 'none';
+
+    // Logique cumulative des rôles
+    // ADMIN voit tout
+    if (role === 'ADMIN') {
+        if (sections.analyst) sections.analyst.style.display = 'block';
+        if (sections.windy) sections.windy.style.display = 'block';
+        if (sections.admin) sections.admin.style.display = 'block';
+    }
+    // ANALYST voit BASIC + ANALYST
+    else if (role === 'ANALYST') {
+        if (sections.analyst) sections.analyst.style.display = 'block';
+    }
+    // WINDY voit BASIC + WINDY
+    else if (role === 'WINDY') {
+        if (sections.windy) sections.windy.style.display = 'block';
+    }
+    // BASIC ne voit que BASIC (déjà affiché par défaut)
 }
 
 // Aller au dashboard
@@ -211,20 +150,11 @@ function goToDashboard() {
 }
 
 // Déconnexion
-async function logout() {
-    const authMethod = sessionStorage.getItem('authMethod');
-
-    if (authMethod === 'keycloak' && keycloak) {
-        await keycloak.logout({
-            redirectUri: window.location.origin + '/frontend/login.html'
-        });
-    }
-
+function logout() {
     // Nettoyer le sessionStorage
     sessionStorage.clear();
-    currentToken = null;
     currentUser = null;
 
-    // Recharger la page
-    window.location.reload();
+    // Rediriger vers login
+    window.location.href = 'login.html';
 }
