@@ -1,0 +1,123 @@
+{
+  "realm": "temperature-api",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "clients": [
+    {
+      "clientId": "temperature-frontend",
+      "enabled": true,
+      "publicClient": true,
+      "redirectUris": [
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "file://*"
+      ],
+      "webOrigins": [
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "file://*",
+        "+"
+      ],
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "BASIC",
+        "description": "Accès de base aux données"
+      },
+      {
+        "name": "ANALYST",
+        "description": "Accès aux analyses historiques"
+      },
+      {
+        "name": "WINDY",
+        "description": "Accès aux données temps réel"
+      },
+      {
+        "name": "ADMIN",
+        "description": "Accès complet à toutes les fonctionnalités"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "basic-user",
+      "enabled": true,
+      "email": "basic@cesi.fr",
+      "emailVerified": true,
+      "firstName": "Basic",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "basic123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["BASIC"]
+    },
+    {
+      "username": "analyst-user",
+      "enabled": true,
+      "email": "analyst@cesi.fr",
+      "emailVerified": true,
+      "firstName": "Analyst",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "analyst123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ANALYST"]
+    },
+    {
+      "username": "windy-user",
+      "enabled": true,
+      "email": "windy@cesi.fr",
+      "emailVerified": true,
+      "firstName": "Windy",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "windy123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["WINDY"]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@cesi.fr",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ADMIN"]
+    }
+  ]
+}
