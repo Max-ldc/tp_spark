@@ -54,11 +54,12 @@ Projet d'analyse de données climatiques combinant :
 │                    API REST (FastAPI)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Port 8000 - http://localhost:8000/docs                         │
-│  🔐 Authentification : JWT ou API Keys statiques                │
+│  🔐 Auth Hybride : Certificats X.509 > JWT > API Keys           │
 │                                                                  │
 │  AUTH                     │  HISTORIQUE                          │
 │  POST /auth/token         │  /data                               │
-│                           │  /stats                              │
+│  POST /auth/certificate   │  /stats                              │
+│  GET  /auth/test          │  /anomalies                          │
 │  WINDY (TEMPS RÉEL)       │  /anomalies                          │
 │  /windy/current           │  /warming/top                        │
 │  /windy/anomalies         │  /hemispheres                        │
@@ -130,17 +131,36 @@ docker compose up etl
 docker compose up -d api
 ```
 
-### 🔐 Authentification
+### 🔐 Authentification Hybride
 
-L'API utilise **JWT (JSON Web Tokens)** pour l'authentification. Deux méthodes disponibles :
+L'API supporte **3 méthodes d'authentification** par ordre de priorité :
 
-#### Option 1 : Clés API statiques (rétro-compatible)
+**1️⃣ Certificats X.509** (Haute sécurité - Production)  
+**2️⃣ JWT Bearer Token** (Recommandé)  
+**3️⃣ API Keys Statiques** (Développement)
+
+> 📖 **Documentation complète** : Voir [HYBRID_AUTH.md](HYBRID_AUTH.md) pour tous les détails.
+
+#### Option 1 : Certificats X.509 (Production)
+
+Authentification par certificat client avec validation CA :
+
 ```bash
-# Passer la clé dans le header X-API-Key
-curl -H "X-API-Key: basic-key-001" http://localhost:8000/cities
+# Les certificats sont déjà générés dans certs/clients/
+# - client-basic-cert.pem (BASIC)
+# - client-analyst-cert.pem (ANALYST)  
+# - client-windy-cert.pem (WINDY)
+# - client-admin-cert.pem (ADMIN)
+
+# Valider un certificat et obtenir un JWT
+curl -X POST "http://localhost:8000/auth/certificate?cert_pem=$(cat certs/clients/client-admin-cert.pem)"
+
+# Créer un nouveau certificat
+python add_client_certificate.py username ROLE
 ```
 
-#### Option 2 : JWT (recommandé)
+#### Option 2 : JWT Bearer Token (Recommandé)
+
 ```bash
 # 1. Générer un JWT avec votre clé API
 curl -X POST "http://localhost:8000/auth/token?api_key=admin-key-004"
@@ -157,6 +177,13 @@ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
      http://localhost:8000/cities
 ```
 
+#### Option 3 : API Keys Statiques (Développement)
+
+```bash
+# Passer la clé dans le header X-API-Key
+curl -H "X-API-Key: basic-key-001" http://localhost:8000/cities
+```
+
 **Clés API disponibles :**
 - `basic-key-001` → Rôle BASIC (50 résultats max)
 - `analyst-key-002` → Rôle ANALYST (200 résultats max)
@@ -168,6 +195,12 @@ curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
 - **ANALYST** : BASIC + analyses historiques (anomalies, search, recent/*)
 - **WINDY** : BASIC + données temps réel (windy/*)
 - **ADMIN** : Accès complet (tous les endpoints)
+
+**Endpoint de test (sans Spark) :**
+```bash
+# Tester l'authentification rapidement
+curl -H "X-API-Key: basic-key-001" http://localhost:8000/auth/test
+```
 
 **Endpoints disponibles :**
 
@@ -321,8 +354,9 @@ tp_spark/
 
 - **Apache Spark 4.1.1** : Traitement distribué
 - **PySpark** : API Python pour Spark
-- **FastAPI** : API REST moderne avec authentification JWT
+- **FastAPI** : API REST moderne avec authentification hybride
 - **PyJWT** : Gestion des JSON Web Tokens
+- **cryptography** : Validation des certificats X.509
 - **Docker** : Conteneurisation
 - **Parquet** : Format de stockage columnaire optimisé
 - **Windy API** : Données météo temps réel
