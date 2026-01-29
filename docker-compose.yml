@@ -6,11 +6,19 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./logs:/var/log/temperature-api
     ports:
       - "4040:4040"
     command: python src/main.py
     stdin_open: true
     tty: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
 
   # API de requêtage
   api:
@@ -19,10 +27,18 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./logs:/var/log/temperature-api
     ports:
       - "8000:8000"
       - "4041:4040"
     command: python src/api/main.py
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
 
   # Streaming Windy (polling continu de l'API)
   windy-streaming:
@@ -31,6 +47,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./logs:/var/log/temperature-api
     environment:
       - WINDY_API_KEY=${WINDY_API_KEY}
     ports:
@@ -38,3 +55,70 @@ services:
     command: python src/streaming_main.py
     stdin_open: true
     tty: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-network
+
+  # Loki - Stockage et agrégation des logs
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - app-network
+    user: "0"
+
+  # Promtail - Collecteur de logs
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/var/log/temperature-api
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Grafana - Visualisation des logs
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./observability/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./observability/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./observability/grafana/dashboard.json:/etc/grafana/provisioning/dashboards/dashboard.json
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  loki-data:
+  grafana-data:
+
+
+networks:
+  app-network:
+    driver: bridge

@@ -24,6 +24,23 @@ from slowapi.errors import RateLimitExceeded
 from services.spark_service import get_query_service
 from services.windy_service import get_windy_service
 from auth import HybridAuthManager, create_hybrid_auth_dependency
+from utils.logger import create_logger
+from utils.logging_middleware import LoggingMiddleware
+
+
+# ============================================================================
+# CONFIGURATION LOGGING
+# ============================================================================
+
+# Créer le logger pour l'API
+logger = create_logger(
+    name="temperature-api",
+    service_name="temperature-api",
+    log_dir="/var/log/temperature-api",
+    log_level=os.getenv("LOG_LEVEL", "INFO")
+)
+
+logger.info("Démarrage de l'API Temperature Query")
 
 
 # ============================================================================
@@ -44,10 +61,10 @@ ROLE_HIERARCHY = {
 
 # Clés API valides (en production, utiliser une base de données ou env vars)
 VALID_API_KEYS = {
-    "basic-key-001": {"name": "Basic User", "role": "BASIC", "max_results": 50},
-    "analyst-key-002": {"name": "Analyst User", "role": "ANALYST", "max_results": 200},
-    "windy-key-003": {"name": "Windy User", "role": "WINDY", "max_results": 200},
-    "admin-key-004": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
+    "IkJBU0lDIiwgIm1heF9yZXN1bHRzIjogNTA=": {"name": "Basic User", "role": "BASIC", "max_results": 50},
+    "IkFOQUxZU1QiLCAibWF4X3Jlc3VsdHMiOiAyMDA=": {"name": "Analyst User", "role": "ANALYST", "max_results": 200},
+    "IldJTkRZIiwgIm1heF9yZXN1bHRzIjogMjAw": {"name": "Windy User", "role": "WINDY", "max_results": 200},
+    "IkFETUlOIiwgIm1heF9yZXN1bHRzIjogMTAwMA==": {"name": "Admin User", "role": "ADMIN", "max_results": 1000},
 }
 
 # Configuration JWT
@@ -99,6 +116,9 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# Ajouter le middleware de logging
+app.add_middleware(LoggingMiddleware, logger=logger)
 
 # Configuration Rate Limiting
 limiter = Limiter(key_func=get_remote_address)
@@ -230,11 +250,13 @@ async def generate_token(
     resolved_key = api_key or header_key
     
     if resolved_key is None:
+        logger.warning("Tentative de génération de token sans clé API")
         raise HTTPException(
             status_code=401,
             detail="Clé API requise (paramètre 'api_key' ou header 'X-API-Key')"
         )
     if resolved_key not in VALID_API_KEYS:
+        logger.warning("Tentative d'authentification avec clé API invalide", api_key=resolved_key[:10] + "...")
         raise HTTPException(
             status_code=403,
             detail="Clé API invalide"
@@ -248,6 +270,12 @@ async def generate_token(
         role=user_info["role"],
         max_results=user_info["max_results"],
         expiration_hours=JWT_EXPIRATION_HOURS
+    )
+    
+    logger.info(
+        f"Token JWT généré avec succès",
+        user=user_info["name"],
+        role=user_info["role"]
     )
     
     return token_response
@@ -343,15 +371,26 @@ async def get_data(
     """
     require_role(api_info, "BASIC")
     try:
+        logger.info(
+            "Requête de données",
+            city=city,
+            limit=limit,
+            user=api_info.get("name"),
+            role=api_info.get("role")
+        )
         service = get_query_service()
         data = service.get_data(city=city, limit=limit)
         data = limit_results(data, api_info)
+        
+        logger.info("Données retournées avec succès", count=len(data), city=city)
+        
         return {
             "count": len(data),
             "data": data,
             "limited_to": api_info.get("max_results")
         }
     except Exception as e:
+        logger.exception("Erreur lors de la récupération des données", city=city)
         raise HTTPException(status_code=500, detail=str(e))
 
 
