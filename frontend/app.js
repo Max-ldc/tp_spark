@@ -5,13 +5,30 @@ const keycloakConfig = {
     clientId: 'temperature-frontend'
 };
 
+// Configuration API - détection automatique
+const getApiUrl = () => {
+    // Si on accède via localhost, utiliser localhost
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://127.0.0.1:8000';
+    }
+    // Sinon, utiliser l'IP du serveur sur le port 8000
+    return `http://${window.location.hostname}:8000`;
+};
+
+const API_URL = getApiUrl();
+console.log('API URL:', API_URL);
+
 let keycloak = null;
 let currentToken = null;
 let currentUser = null;
 
 // Initialisation au chargement de la page
 document.addEventListener('DOMContentLoaded', () => {
-    initKeycloak();
+    // Désactiver Keycloak temporairement - afficher directement les méthodes d'auth
+    showAuthMethods();
+
+    // Décommenter pour réactiver Keycloak :
+    // initKeycloak();
 });
 
 // Initialiser Keycloak
@@ -92,7 +109,7 @@ async function loginWithApiKey() {
 
     try {
         // Tester la clé API avec l'endpoint /auth/test
-        const response = await fetch('http://127.0.0.1:8000/auth/test', {
+        const response = await fetch(`${API_URL}/auth/test`, {
             mode: 'cors',
             headers: {
                 'X-API-Key': apiKey

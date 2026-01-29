@@ -184,7 +184,7 @@
                     headers['X-API-Key'] = apiKey;
                 }
 
-                const response = await fetch(`http://127.0.0.1:8000${endpoint}`, { headers });
+                const response = await fetch(`${API_URL}${endpoint}`, { headers });
                 const data = await response.json();
 
                 responseContainer.innerHTML = `
